@@ -220,7 +220,7 @@ function createWindow() {
               type: 'info',
               title: 'Grammarly Compatibility',
               message: 'Grammarly Support',
-              detail: 'NotepadPlus uses CodeMirror 6 which renders via contenteditable, making it compatible with Grammarly browser extension.\n\nTo use: Install the Grammarly desktop app or browser extension. Grammarly will detect the editor as a text input field.',
+              detail: 'Click the "Prose" button in the toolbar to switch to a plain text editor that Grammarly Desktop can detect.\n\nProse mode syncs your content to a standard text area. When you toggle back, changes return to the code editor.\n\nRequires: Grammarly Desktop app for Windows.',
             });
           },
         },

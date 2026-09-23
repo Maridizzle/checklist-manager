@@ -882,3 +882,51 @@ body.light-theme .dialog-buttons button:first-child {
 body.light-theme .dialog-buttons button:last-child {
   background: linear-gradient(180deg, #d8d4ca, #ccc8be);
 }
+
+#editor.hidden {
+  display: none;
+}
+
+#prose-editor {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-family: 'Consolas', monospace;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: #282c34;
+  tab-size: 4;
+}
+
+#prose-editor.hidden {
+  display: none;
+}
+
+#prose-editor:focus {
+  outline: none;
+}
+
+body.light-theme #prose-editor {
+  background: #f0ede4;
+  color: #2a2e2a;
+}
+
+#btn-prose.active {
+  background: var(--accent);
+  color: var(--char-black);
+  box-shadow: inset 0 0 6px rgba(200, 150, 46, 0.5);
+}
+
+#prose-indicator {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  margin-left: 4px;
+}

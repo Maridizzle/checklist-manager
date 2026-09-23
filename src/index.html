@@ -58,6 +58,8 @@
     </div>
     <span class="toolbar-separator"></span>
     <span id="autosave-indicator" title="Auto-save is active">Auto-save: ON</span>
+    <span class="toolbar-separator"></span>
+    <button id="btn-prose" title="Toggle Prose Mode for Grammarly">Prose</button>
   </div>
 
   <div id="tab-bar">
@@ -88,6 +90,7 @@
     <div id="sidebar-resize-handle"></div>
     <div id="editor-area">
       <div id="editor"></div>
+      <textarea id="prose-editor" class="hidden" spellcheck="true"></textarea>
       <div class="split-gutter" id="split-gutter"></div>
       <div id="editor-split"></div>
       <div id="minimap" class="hidden">
