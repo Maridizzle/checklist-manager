@@ -170,7 +170,11 @@ function getActiveTab() {
 function switchToTab(id) {
   const currentTab = getActiveTab();
   if (currentTab && editorView) {
-    currentTab.content = editorView.state.doc.toString();
+    if (proseMode) {
+      currentTab.content = document.getElementById('prose-editor').value;
+    } else {
+      currentTab.content = editorView.state.doc.toString();
+    }
     currentTab.scrollPos = editorView.scrollDOM.scrollTop;
     currentTab.cursorPos = editorView.state.selection.main.head;
   }
@@ -187,6 +191,10 @@ function switchToTab(id) {
   editorView.dispatch({
     effects: languageCompartment.reconfigure(langExt),
   });
+
+  if (proseMode) {
+    document.getElementById('prose-editor').value = tab.content;
+  }
 
   if (tab.scrollPos !== null) {
     editorView.scrollDOM.scrollTop = tab.scrollPos;
@@ -315,7 +323,9 @@ async function saveCurrentFile() {
   const tab = getActiveTab();
   if (!tab) return;
 
-  const content = editorView.state.doc.toString();
+  const content = proseMode
+    ? document.getElementById('prose-editor').value
+    : editorView.state.doc.toString();
 
   if (!tab.filePath) {
     await saveCurrentFileAs();
@@ -335,7 +345,9 @@ async function saveCurrentFileAs() {
   const tab = getActiveTab();
   if (!tab) return;
 
-  const content = editorView.state.doc.toString();
+  const content = proseMode
+    ? document.getElementById('prose-editor').value
+    : editorView.state.doc.toString();
   const result = await window.electronAPI.saveAs({
     content,
     defaultPath: tab.filePath || 'untitled.txt',
@@ -521,6 +533,34 @@ function flashAutoSaveIndicator() {
     indicator.textContent = 'Auto-save: ON';
     indicator.style.color = '#73c991';
   }, 1500);
+}
+
+let proseMode = false;
+
+function toggleProseMode() {
+  const editorEl = document.getElementById('editor');
+  const proseEl = document.getElementById('prose-editor');
+  const btn = document.getElementById('btn-prose');
+
+  proseMode = !proseMode;
+
+  if (proseMode) {
+    proseEl.value = editorView.state.doc.toString();
+    editorEl.classList.add('hidden');
+    proseEl.classList.remove('hidden');
+    proseEl.style.fontFamily = document.getElementById('font-select').value;
+    proseEl.focus();
+    btn.classList.add('active');
+  } else {
+    const content = proseEl.value;
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: content },
+    });
+    proseEl.classList.add('hidden');
+    editorEl.classList.remove('hidden');
+    editorView.focus();
+    btn.classList.remove('active');
+  }
 }
 
 function setEditorFont(fontFamily) {
@@ -1111,6 +1151,12 @@ function wireEvents() {
     el.addEventListener('click', () => {
       setEditorBackground(el.dataset.color);
     });
+  });
+
+  document.getElementById('btn-prose').addEventListener('click', toggleProseMode);
+
+  document.getElementById('prose-editor').addEventListener('input', () => {
+    markModified();
   });
 
   document.getElementById('btn-open-folder').addEventListener('click', () => {
