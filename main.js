@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let recentFiles = [];
+const MAX_RECENT = 15;
+
+function addRecentFile(filePath) {
+  recentFiles = recentFiles.filter(f => f !== filePath);
+  recentFiles.unshift(filePath);
+  if (recentFiles.length > MAX_RECENT) recentFiles.length = MAX_RECENT;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -41,6 +49,12 @@ function createWindow() {
           label: 'Save As...',
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => mainWindow.webContents.send('menu-save-as'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Open Folder...',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => handleFolderOpen(),
         },
         { type: 'separator' },
         {
@@ -108,6 +122,7 @@ async function handleFileOpen() {
     const filePath = result.filePaths[0];
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
+      addRecentFile(filePath);
       mainWindow.webContents.send('file-opened', { filePath, content });
     } catch (err) {
       dialog.showErrorBox('Error', `Could not read file: ${err.message}`);
@@ -115,8 +130,22 @@ async function handleFileOpen() {
   }
 }
 
+async function handleFolderOpen() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    mainWindow.webContents.send('folder-opened', { folderPath: result.filePaths[0] });
+  }
+}
+
 ipcMain.handle('dialog-open', async () => {
   await handleFileOpen();
+});
+
+ipcMain.handle('dialog-open-folder', async () => {
+  await handleFolderOpen();
 });
 
 ipcMain.handle('dialog-save-as', async (event, { content, defaultPath }) => {
@@ -151,10 +180,42 @@ ipcMain.handle('file-save', async (event, { filePath, content }) => {
 ipcMain.handle('file-read', async (event, { filePath }) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
+    addRecentFile(filePath);
     return { success: true, content };
   } catch (err) {
     return { success: false, error: err.message };
   }
+});
+
+ipcMain.handle('read-directory', async (event, { dirPath }) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const items = entries
+      .filter(e => !e.name.startsWith('.'))
+      .map(e => ({
+        name: e.name,
+        path: path.join(dirPath, e.name),
+        isDirectory: e.isDirectory(),
+      }))
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+    return { success: true, items };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-recent-files', async () => {
+  return recentFiles.filter(f => {
+    try { return fs.existsSync(f); } catch { return false; }
+  });
+});
+
+ipcMain.handle('track-recent-file', async (event, { filePath }) => {
+  addRecentFile(filePath);
+  return { success: true };
 });
 
 app.whenReady().then(createWindow);

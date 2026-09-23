@@ -56,6 +56,7 @@ let activeTabId = null;
 let tabCounter = 0;
 let editorView = null;
 let fontSize = 14;
+let currentFolderPath = null;
 
 function getFileExtension(filePath) {
   if (!filePath) return '';
@@ -319,6 +320,177 @@ function initEditor() {
   createTab(null, '');
 }
 
+async function openFileFromPath(filePath) {
+  const existing = tabs.find(t => t.filePath === filePath);
+  if (existing) {
+    switchToTab(existing.id);
+    return;
+  }
+
+  if (window.electronAPI) {
+    const result = await window.electronAPI.readFile({ filePath });
+    if (result.success) {
+      await window.electronAPI.trackRecentFile({ filePath });
+      createTab(filePath, result.content);
+    }
+  }
+}
+
+async function loadFolderTree(folderPath) {
+  currentFolderPath = folderPath;
+  const container = document.getElementById('file-tree-content');
+  container.innerHTML = '';
+
+  const rootLabel = folderPath.replace(/\\/g, '/').split('/').pop();
+  const rootDiv = document.createElement('div');
+  rootDiv.className = 'tree-item';
+  rootDiv.style.paddingLeft = '4px';
+  rootDiv.style.fontWeight = '600';
+  rootDiv.innerHTML = `<span class="tree-icon folder">&#9660;</span><span class="tree-label">${rootLabel}</span>`;
+  container.appendChild(rootDiv);
+
+  const childrenDiv = document.createElement('div');
+  childrenDiv.className = 'tree-children expanded';
+  container.appendChild(childrenDiv);
+
+  await populateTreeLevel(childrenDiv, folderPath, 1);
+
+  rootDiv.addEventListener('click', () => {
+    const isExpanded = childrenDiv.classList.contains('expanded');
+    childrenDiv.classList.toggle('expanded');
+    rootDiv.querySelector('.tree-icon').innerHTML = isExpanded ? '&#9654;' : '&#9660;';
+  });
+}
+
+async function populateTreeLevel(parentEl, dirPath, depth) {
+  if (!window.electronAPI) return;
+
+  const result = await window.electronAPI.readDirectory({ dirPath });
+  if (!result.success) return;
+
+  for (const item of result.items) {
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'tree-item';
+    itemDiv.style.paddingLeft = (depth * 16 + 4) + 'px';
+
+    if (item.isDirectory) {
+      itemDiv.innerHTML = `<span class="tree-icon folder">&#9654;</span><span class="tree-label">${item.name}</span>`;
+
+      const childrenDiv = document.createElement('div');
+      childrenDiv.className = 'tree-children';
+      let loaded = false;
+
+      itemDiv.addEventListener('click', async () => {
+        const isExpanded = childrenDiv.classList.contains('expanded');
+        if (!loaded && !isExpanded) {
+          await populateTreeLevel(childrenDiv, item.path, depth + 1);
+          loaded = true;
+        }
+        childrenDiv.classList.toggle('expanded');
+        itemDiv.querySelector('.tree-icon').innerHTML = isExpanded ? '&#9654;' : '&#9660;';
+      });
+
+      parentEl.appendChild(itemDiv);
+      parentEl.appendChild(childrenDiv);
+    } else {
+      itemDiv.innerHTML = `<span class="tree-icon file">&#9679;</span><span class="tree-label">${item.name}</span>`;
+      itemDiv.addEventListener('click', () => openFileFromPath(item.path));
+      parentEl.appendChild(itemDiv);
+    }
+  }
+}
+
+async function loadRecentFiles() {
+  if (!window.electronAPI) return;
+
+  const container = document.getElementById('recent-files-content');
+  const files = await window.electronAPI.getRecentFiles();
+
+  if (!files || files.length === 0) {
+    container.innerHTML = '<div class="sidebar-placeholder">No recent files</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  for (const filePath of files) {
+    const item = document.createElement('div');
+    item.className = 'recent-item';
+
+    const name = filePath.replace(/\\/g, '/').split('/').pop();
+    const dir = filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+
+    item.innerHTML = `<span class="recent-name">${name}</span><span class="recent-path">${dir}</span>`;
+    item.addEventListener('click', () => openFileFromPath(filePath));
+    container.appendChild(item);
+  }
+}
+
+function initSidebarTabs() {
+  const tabBtns = document.querySelectorAll('.sidebar-tab');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.panel).classList.add('active');
+
+      if (btn.dataset.panel === 'recent-files') {
+        loadRecentFiles();
+      }
+    });
+  });
+}
+
+function initSidebarResize() {
+  const handle = document.getElementById('sidebar-resize-handle');
+  const sidebar = document.getElementById('sidebar');
+  let startX, startWidth;
+
+  handle.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startWidth = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.classList.add('dragging-sidebar');
+
+    const onMouseMove = (e) => {
+      const newWidth = startWidth + (e.clientX - startX);
+      sidebar.style.width = Math.max(150, Math.min(500, newWidth)) + 'px';
+    };
+
+    const onMouseUp = () => {
+      handle.classList.remove('dragging');
+      document.body.classList.remove('dragging-sidebar');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function initDragAndDrop() {
+  const editorArea = document.getElementById('editor-area');
+
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        if (file.path) {
+          openFileFromPath(file.path);
+        }
+      }
+    }
+  });
+}
+
 function wireEvents() {
   document.getElementById('btn-new').addEventListener('click', () => createTab(null, ''));
   document.getElementById('btn-open').addEventListener('click', () => window.electronAPI.openFile());
@@ -337,6 +509,10 @@ function wireEvents() {
   document.getElementById('btn-zoom-in').addEventListener('click', () => setFontSize(fontSize + 2));
   document.getElementById('btn-zoom-out').addEventListener('click', () => setFontSize(fontSize - 2));
 
+  document.getElementById('btn-open-folder').addEventListener('click', () => {
+    if (window.electronAPI) window.electronAPI.openFolder();
+  });
+
   if (window.electronAPI) {
     window.electronAPI.onFileOpened(({ filePath, content }) => {
       const existing = tabs.find(t => t.filePath === filePath);
@@ -345,6 +521,10 @@ function wireEvents() {
         return;
       }
       createTab(filePath, content);
+    });
+
+    window.electronAPI.onFolderOpened(({ folderPath }) => {
+      loadFolderTree(folderPath);
     });
 
     window.electronAPI.onMenuNew(() => createTab(null, ''));
@@ -360,4 +540,8 @@ function wireEvents() {
 document.addEventListener('DOMContentLoaded', () => {
   initEditor();
   wireEvents();
+  initSidebarTabs();
+  initSidebarResize();
+  initDragAndDrop();
+  loadRecentFiles();
 });

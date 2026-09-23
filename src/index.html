@@ -22,8 +22,31 @@
     <div id="tabs-container"></div>
   </div>
 
-  <div id="editor-area">
-    <div id="editor"></div>
+  <div id="main-content">
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <span id="sidebar-title">EXPLORER</span>
+        <button id="btn-open-folder" title="Open Folder">Open Folder</button>
+      </div>
+      <div id="sidebar-tabs">
+        <button class="sidebar-tab active" data-panel="file-tree">Files</button>
+        <button class="sidebar-tab" data-panel="recent-files">Recent</button>
+      </div>
+      <div id="file-tree" class="sidebar-panel active">
+        <div id="file-tree-content">
+          <div class="sidebar-placeholder">Open a folder to browse files</div>
+        </div>
+      </div>
+      <div id="recent-files" class="sidebar-panel">
+        <div id="recent-files-content">
+          <div class="sidebar-placeholder">No recent files</div>
+        </div>
+      </div>
+    </div>
+    <div id="sidebar-resize-handle"></div>
+    <div id="editor-area">
+      <div id="editor"></div>
+    </div>
   </div>
 
   <div id="status-bar">

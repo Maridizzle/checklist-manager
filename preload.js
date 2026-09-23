@@ -2,11 +2,16 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   openFile: () => ipcRenderer.invoke('dialog-open'),
+  openFolder: () => ipcRenderer.invoke('dialog-open-folder'),
   saveAs: (data) => ipcRenderer.invoke('dialog-save-as', data),
   saveFile: (data) => ipcRenderer.invoke('file-save', data),
   readFile: (data) => ipcRenderer.invoke('file-read', data),
+  readDirectory: (data) => ipcRenderer.invoke('read-directory', data),
+  getRecentFiles: () => ipcRenderer.invoke('get-recent-files'),
+  trackRecentFile: (data) => ipcRenderer.invoke('track-recent-file', data),
 
   onFileOpened: (callback) => ipcRenderer.on('file-opened', (event, data) => callback(data)),
+  onFolderOpened: (callback) => ipcRenderer.on('folder-opened', (event, data) => callback(data)),
   onMenuNew: (callback) => ipcRenderer.on('menu-new', () => callback()),
   onMenuSave: (callback) => ipcRenderer.on('menu-save', () => callback()),
   onMenuSaveAs: (callback) => ipcRenderer.on('menu-save-as', () => callback()),
