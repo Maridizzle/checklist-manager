@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NotepadPlus</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toolbar">
+    <button id="btn-new" title="New File (Ctrl+N)">New</button>
+    <button id="btn-open" title="Open File (Ctrl+O)">Open</button>
+    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button id="btn-save-as" title="Save As (Ctrl+Shift+S)">Save As</button>
+    <span class="toolbar-separator"></span>
+    <button id="btn-wrap" title="Toggle Word Wrap (Alt+Z)">Wrap</button>
+    <button id="btn-zoom-in" title="Zoom In (Ctrl+=)">A+</button>
+    <button id="btn-zoom-out" title="Zoom Out (Ctrl+-)">A-</button>
+  </div>
+
+  <div id="tab-bar">
+    <div id="tabs-container"></div>
+  </div>
+
+  <div id="editor-area">
+    <div id="editor"></div>
+  </div>
+
+  <div id="status-bar">
+    <span id="status-file">Untitled</span>
+    <span id="status-modified"></span>
+    <span class="status-spacer"></span>
+    <span id="status-lang">Plain Text</span>
+    <span id="status-encoding">UTF-8</span>
+    <span id="status-position">Ln 1, Col 1</span>
+  </div>
+
+  <script src="dist/bundle.js"></script>
+</body>
+</html>
