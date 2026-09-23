@@ -728,6 +728,79 @@ function applyGrammarFix(match, index) {
     grammarMatches.length === 0 ? 'No issues found' : `${grammarMatches.length} issue${grammarMatches.length > 1 ? 's' : ''}`;
 }
 
+let proseFindMatches = [];
+let proseFindIndex = -1;
+
+function openProseFind() {
+  const bar = document.getElementById('prose-find-bar');
+  bar.classList.remove('hidden');
+  const input = document.getElementById('prose-find-input');
+  input.focus();
+  input.select();
+}
+
+function closeProseFind() {
+  document.getElementById('prose-find-bar').classList.add('hidden');
+  document.getElementById('prose-find-count').textContent = '';
+  proseFindMatches = [];
+  proseFindIndex = -1;
+}
+
+function proseFindAll(query) {
+  proseFindMatches = [];
+  proseFindIndex = -1;
+  const countEl = document.getElementById('prose-find-count');
+
+  if (!query) {
+    countEl.textContent = '';
+    return;
+  }
+
+  const textarea = document.getElementById('prose-editor');
+  const text = textarea.value.toLowerCase();
+  const q = query.toLowerCase();
+  let pos = 0;
+
+  while (true) {
+    const idx = text.indexOf(q, pos);
+    if (idx === -1) break;
+    proseFindMatches.push(idx);
+    pos = idx + 1;
+  }
+
+  countEl.textContent = proseFindMatches.length > 0
+    ? `${proseFindMatches.length} found`
+    : 'No results';
+
+  if (proseFindMatches.length > 0) {
+    proseFindIndex = 0;
+    proseFindGoTo(0);
+  }
+}
+
+function proseFindGoTo(index) {
+  if (proseFindMatches.length === 0) return;
+  const textarea = document.getElementById('prose-editor');
+  const query = document.getElementById('prose-find-input').value;
+  const pos = proseFindMatches[index];
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos + query.length);
+  document.getElementById('prose-find-count').textContent =
+    `${index + 1} / ${proseFindMatches.length}`;
+}
+
+function proseFindNext() {
+  if (proseFindMatches.length === 0) return;
+  proseFindIndex = (proseFindIndex + 1) % proseFindMatches.length;
+  proseFindGoTo(proseFindIndex);
+}
+
+function proseFindPrev() {
+  if (proseFindMatches.length === 0) return;
+  proseFindIndex = (proseFindIndex - 1 + proseFindMatches.length) % proseFindMatches.length;
+  proseFindGoTo(proseFindIndex);
+}
+
 function toggleProseMode() {
   const editorEl = document.getElementById('editor');
   const proseEl = document.getElementById('prose-editor');
@@ -1311,10 +1384,10 @@ function wireEvents() {
   document.getElementById('btn-wrap').addEventListener('click', toggleWrap);
 
   document.getElementById('btn-find').addEventListener('click', () => {
-    openSearchPanel(editorView);
+    if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
   });
   document.getElementById('btn-replace').addEventListener('click', () => {
-    openSearchPanel(editorView);
+    if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
   });
   document.getElementById('btn-goto').addEventListener('click', showGotoLineDialog);
   document.getElementById('btn-fold-all').addEventListener('click', () => {
@@ -1356,6 +1429,17 @@ function wireEvents() {
     }
   });
 
+  document.getElementById('prose-find-input').addEventListener('input', (e) => {
+    proseFindAll(e.target.value);
+  });
+  document.getElementById('prose-find-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.shiftKey ? proseFindPrev() : proseFindNext(); }
+    if (e.key === 'Escape') { closeProseFind(); }
+  });
+  document.getElementById('prose-find-next').addEventListener('click', proseFindNext);
+  document.getElementById('prose-find-prev').addEventListener('click', proseFindPrev);
+  document.getElementById('prose-find-close').addEventListener('click', closeProseFind);
+
   document.getElementById('grammar-close').addEventListener('click', () => {
     document.getElementById('grammar-panel').classList.add('hidden');
     document.getElementById('btn-grammar').classList.remove('active');
@@ -1386,8 +1470,12 @@ function wireEvents() {
     window.electronAPI.onMenuNew(() => createTab(null, ''));
     window.electronAPI.onMenuSave(() => saveCurrentFile());
     window.electronAPI.onMenuSaveAs(() => saveCurrentFileAs());
-    window.electronAPI.onMenuFind(() => openSearchPanel(editorView));
-    window.electronAPI.onMenuReplace(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuFind(() => {
+      if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
+    });
+    window.electronAPI.onMenuReplace(() => {
+      if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
+    });
     window.electronAPI.onMenuGotoLine(showGotoLineDialog);
     window.electronAPI.onMenuToggleWrap(toggleWrap);
     window.electronAPI.onMenuToggleSidebar(toggleSidebar);

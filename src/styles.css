@@ -883,6 +883,56 @@ body.light-theme .dialog-buttons button:last-child {
   background: linear-gradient(180deg, #d8d4ca, #ccc8be);
 }
 
+#prose-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--char-black);
+}
+
+#prose-find-bar.hidden {
+  display: none;
+}
+
+#prose-find-input {
+  flex: 1;
+  max-width: 300px;
+  padding: 4px 8px;
+  background: var(--verdigris-deep);
+  color: var(--text-active);
+  border: 1px solid var(--char-black);
+  border-radius: 3px;
+  font-size: 13px;
+  outline: none;
+}
+
+#prose-find-input:focus {
+  border-color: var(--accent);
+}
+
+#prose-find-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 50px;
+}
+
+#prose-find-bar button {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--char-black);
+  color: var(--text-primary);
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#prose-find-bar button:hover {
+  background: var(--accent);
+  color: var(--char-black);
+}
+
 #editor.hidden {
   display: none;
 }
