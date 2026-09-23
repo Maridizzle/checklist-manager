@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -17,8 +23,6 @@ jobs:
             platform: win
           - os: macos-latest
             platform: mac
-          - os: ubuntu-latest
-            platform: linux
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -26,10 +30,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      - run: npm ci
+      - run: npm install
 
       - run: npm run build
 
@@ -45,8 +49,6 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
-            dist/*.AppImage
-            dist/*.deb
           if-no-files-found: ignore
 
   release:
@@ -62,6 +64,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version || github.ref_name }}
           files: dist/*
           generate_release_notes: true
         env:

@@ -21,7 +21,29 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: true,
     },
+  });
+
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (params.misspelledWord) {
+      const suggestions = params.dictionarySuggestions;
+      const menuItems = suggestions.slice(0, 8).map(word => ({
+        label: word,
+        click: () => mainWindow.webContents.replaceMisspelling(word),
+      }));
+
+      if (menuItems.length > 0) {
+        menuItems.push({ type: 'separator' });
+      }
+
+      menuItems.push({
+        label: 'Add to Dictionary',
+        click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      });
+
+      Menu.buildFromTemplate(menuItems).popup();
+    }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
@@ -338,6 +360,51 @@ ipcMain.handle('get-recent-files', async () => {
 ipcMain.handle('track-recent-file', async (event, { filePath }) => {
   addRecentFile(filePath);
   return { success: true };
+});
+
+ipcMain.handle('check-grammar', async (event, { text, language }) => {
+  const https = require('https');
+  const querystring = require('querystring');
+
+  const postData = querystring.stringify({
+    text,
+    language: language || 'en-US',
+  });
+
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'api.languagetool.org',
+      port: 443,
+      path: '/v2/check',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ success: true, result: JSON.parse(data) });
+        } catch (err) {
+          resolve({ success: false, error: 'Failed to parse response' });
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve({ success: false, error: 'Request timed out' });
+    });
+
+    req.write(postData);
+    req.end();
+  });
 });
 
 ipcMain.handle('set-title', async (event, { title }) => {

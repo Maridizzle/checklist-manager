@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRecentFiles: () => ipcRenderer.invoke('get-recent-files'),
   trackRecentFile: (data) => ipcRenderer.invoke('track-recent-file', data),
   setTitle: (data) => ipcRenderer.invoke('set-title', data),
+  checkGrammar: (data) => ipcRenderer.invoke('check-grammar', data),
 
   onFileOpened: (callback) => ipcRenderer.on('file-opened', (event, data) => callback(data)),
   onFolderOpened: (callback) => ipcRenderer.on('folder-opened', (event, data) => callback(data)),
