@@ -13,7 +13,16 @@
     <button id="btn-save" title="Save (Ctrl+S)">Save</button>
     <button id="btn-save-as" title="Save As (Ctrl+Shift+S)">Save As</button>
     <span class="toolbar-separator"></span>
+    <button id="btn-find" title="Find (Ctrl+F)">Find</button>
+    <button id="btn-replace" title="Replace (Ctrl+H)">Replace</button>
+    <button id="btn-goto" title="Go to Line (Ctrl+G)">Go to</button>
+    <span class="toolbar-separator"></span>
+    <button id="btn-fold-all" title="Fold All">Fold All</button>
+    <button id="btn-unfold-all" title="Unfold All">Unfold All</button>
+    <span class="toolbar-separator"></span>
     <button id="btn-wrap" title="Toggle Word Wrap (Alt+Z)">Wrap</button>
+    <button id="btn-minimap" title="Toggle Minimap">Minimap</button>
+    <button id="btn-sidebar-toggle" title="Toggle Sidebar (Ctrl+B)">Sidebar</button>
     <button id="btn-zoom-in" title="Zoom In (Ctrl+=)">A+</button>
     <button id="btn-zoom-out" title="Zoom Out (Ctrl+-)">A-</button>
     <span class="toolbar-separator"></span>
@@ -79,6 +88,20 @@
     <div id="sidebar-resize-handle"></div>
     <div id="editor-area">
       <div id="editor"></div>
+      <div id="minimap" class="hidden">
+        <canvas id="minimap-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div id="goto-dialog" class="dialog-overlay hidden">
+    <div class="dialog-box">
+      <label for="goto-input">Go to Line:</label>
+      <input type="number" id="goto-input" min="1" placeholder="Line number">
+      <div class="dialog-buttons">
+        <button id="goto-ok">Go</button>
+        <button id="goto-cancel">Cancel</button>
+      </div>
     </div>
   </div>
 

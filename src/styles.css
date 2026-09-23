@@ -471,6 +471,151 @@ body.dragging-sidebar {
   white-space: nowrap;
 }
 
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  z-index: 1000;
+}
+
+.dialog-overlay.hidden {
+  display: none;
+}
+
+.dialog-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 20px;
+  min-width: 280px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.dialog-box label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.dialog-box input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  margin-bottom: 12px;
+}
+
+.dialog-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialog-buttons button {
+  padding: 5px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.dialog-buttons button:first-child {
+  background: var(--accent);
+  color: var(--text-active);
+  border-color: var(--accent);
+}
+
+.dialog-buttons button:last-child {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dialog-buttons button:hover {
+  opacity: 0.9;
+}
+
+#minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  z-index: 10;
+}
+
+#minimap.hidden {
+  display: none;
+}
+
+#minimap-canvas {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.minimap-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  pointer-events: none;
+}
+
+#sidebar.collapsed {
+  width: 0 !important;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+#toolbar button.active {
+  background: var(--accent);
+  color: var(--text-active);
+}
+
+.cm-editor .cm-searchMatch {
+  background-color: rgba(255, 200, 0, 0.3);
+  outline: 1px solid rgba(255, 200, 0, 0.5);
+}
+
+.cm-editor .cm-searchMatch.cm-searchMatch-selected {
+  background-color: rgba(255, 150, 0, 0.5);
+}
+
+.cm-editor .cm-foldGutter .cm-gutterElement {
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0 2px;
+}
+
+.cm-editor .cm-foldGutter .cm-gutterElement:hover {
+  color: var(--text-active);
+}
+
 .cm-wiki-link {
   color: #6ab0f3;
   text-decoration: underline;

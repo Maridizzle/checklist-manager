@@ -74,11 +74,46 @@ function createWindow() {
         { label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' },
         { label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' },
         { label: 'Select All', accelerator: 'CmdOrCtrl+A', role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find...',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow.webContents.send('menu-find'),
+        },
+        {
+          label: 'Replace...',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => mainWindow.webContents.send('menu-replace'),
+        },
+        {
+          label: 'Go to Line...',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => mainWindow.webContents.send('menu-goto-line'),
+        },
       ],
     },
     {
       label: 'View',
       submenu: [
+        {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => mainWindow.webContents.send('menu-toggle-sidebar'),
+        },
+        {
+          label: 'Toggle Minimap',
+          click: () => mainWindow.webContents.send('menu-toggle-minimap'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Fold All',
+          click: () => mainWindow.webContents.send('menu-fold-all'),
+        },
+        {
+          label: 'Unfold All',
+          click: () => mainWindow.webContents.send('menu-unfold-all'),
+        },
+        { type: 'separator' },
         {
           label: 'Toggle Word Wrap',
           accelerator: 'Alt+Z',

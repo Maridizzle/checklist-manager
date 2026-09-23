@@ -1,9 +1,9 @@
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches, openSearchPanel, closeSearchPanel } from '@codemirror/search';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
+import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, foldAll, unfoldAll } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { javascript } from '@codemirror/lang-javascript';
@@ -374,6 +374,7 @@ function initEditor() {
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           markModified();
+          if (minimapVisible) requestAnimationFrame(renderMinimap);
         }
         if (update.selectionSet || update.docChanged) {
           updateStatusBar();
@@ -673,6 +674,172 @@ function initSidebarResize() {
   });
 }
 
+function showGotoLineDialog() {
+  const dialog = document.getElementById('goto-dialog');
+  const input = document.getElementById('goto-input');
+  dialog.classList.remove('hidden');
+  input.value = '';
+  input.focus();
+
+  const maxLine = editorView.state.doc.lines;
+  input.max = maxLine;
+  input.placeholder = `1 - ${maxLine}`;
+}
+
+function hideGotoLineDialog() {
+  document.getElementById('goto-dialog').classList.add('hidden');
+  editorView.focus();
+}
+
+function executeGotoLine() {
+  const input = document.getElementById('goto-input');
+  const lineNum = parseInt(input.value, 10);
+  if (isNaN(lineNum) || lineNum < 1) {
+    hideGotoLineDialog();
+    return;
+  }
+
+  const doc = editorView.state.doc;
+  const targetLine = Math.min(lineNum, doc.lines);
+  const line = doc.line(targetLine);
+
+  editorView.dispatch({
+    selection: { anchor: line.from },
+    effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+  });
+  hideGotoLineDialog();
+}
+
+function initGotoLineDialog() {
+  document.getElementById('goto-ok').addEventListener('click', executeGotoLine);
+  document.getElementById('goto-cancel').addEventListener('click', hideGotoLineDialog);
+
+  document.getElementById('goto-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') executeGotoLine();
+    if (e.key === 'Escape') hideGotoLineDialog();
+  });
+
+  document.getElementById('goto-dialog').addEventListener('click', (e) => {
+    if (e.target.classList.contains('dialog-overlay')) hideGotoLineDialog();
+  });
+}
+
+let minimapVisible = false;
+let minimapAnimFrame = null;
+
+function toggleMinimap() {
+  minimapVisible = !minimapVisible;
+  const minimap = document.getElementById('minimap');
+  const btn = document.getElementById('btn-minimap');
+
+  if (minimapVisible) {
+    minimap.classList.remove('hidden');
+    btn.classList.add('active');
+    renderMinimap();
+  } else {
+    minimap.classList.add('hidden');
+    btn.classList.remove('active');
+    if (minimapAnimFrame) cancelAnimationFrame(minimapAnimFrame);
+  }
+}
+
+function renderMinimap() {
+  if (!minimapVisible || !editorView) return;
+
+  const canvas = document.getElementById('minimap-canvas');
+  const container = document.getElementById('minimap');
+  const rect = container.getBoundingClientRect();
+
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const doc = editorView.state.doc;
+  const totalLines = doc.lines;
+  if (totalLines === 0) return;
+
+  const lineHeight = Math.max(1, Math.min(3, rect.height / totalLines));
+  const charWidth = 0.8;
+
+  ctx.font = `${lineHeight}px monospace`;
+
+  for (let i = 1; i <= totalLines && (i - 1) * lineHeight < rect.height; i++) {
+    const line = doc.line(i);
+    const text = line.text;
+    const y = (i - 1) * lineHeight;
+
+    for (let j = 0; j < Math.min(text.length, 120); j++) {
+      if (text[j] !== ' ' && text[j] !== '\t') {
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.35)';
+        ctx.fillRect(4 + j * charWidth, y, charWidth, lineHeight * 0.8);
+      }
+    }
+  }
+
+  const scrollInfo = editorView.scrollDOM;
+  const scrollTop = scrollInfo.scrollTop;
+  const scrollHeight = scrollInfo.scrollHeight;
+  const clientHeight = scrollInfo.clientHeight;
+
+  if (scrollHeight > 0) {
+    const viewportTop = (scrollTop / scrollHeight) * rect.height;
+    const viewportHeight = (clientHeight / scrollHeight) * rect.height;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(0, viewportTop, rect.width, viewportHeight);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeRect(0, viewportTop, rect.width, viewportHeight);
+  }
+}
+
+function initMinimap() {
+  const canvas = document.getElementById('minimap-canvas');
+
+  canvas.addEventListener('click', (e) => {
+    if (!editorView) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = e.offsetY / rect.height;
+    const scrollHeight = editorView.scrollDOM.scrollHeight;
+    const clientHeight = editorView.scrollDOM.clientHeight;
+    editorView.scrollDOM.scrollTop = ratio * (scrollHeight - clientHeight);
+  });
+
+  const observer = new MutationObserver(() => {
+    if (minimapVisible) requestAnimationFrame(renderMinimap);
+  });
+
+  setTimeout(() => {
+    const scroller = editorView?.scrollDOM;
+    if (scroller) {
+      scroller.addEventListener('scroll', () => {
+        if (minimapVisible) requestAnimationFrame(renderMinimap);
+      });
+    }
+  }, 500);
+}
+
+let sidebarVisible = true;
+
+function toggleSidebar() {
+  sidebarVisible = !sidebarVisible;
+  const sidebar = document.getElementById('sidebar');
+  const handle = document.getElementById('sidebar-resize-handle');
+  const btn = document.getElementById('btn-sidebar-toggle');
+
+  if (sidebarVisible) {
+    sidebar.classList.remove('collapsed');
+    handle.style.display = '';
+    btn.classList.remove('active');
+  } else {
+    sidebar.classList.add('collapsed');
+    handle.style.display = 'none';
+    btn.classList.add('active');
+  }
+}
+
 function initDragAndDrop() {
   const editorArea = document.getElementById('editor-area');
 
@@ -709,6 +876,22 @@ function wireEvents() {
     });
   };
   document.getElementById('btn-wrap').addEventListener('click', toggleWrap);
+
+  document.getElementById('btn-find').addEventListener('click', () => {
+    openSearchPanel(editorView);
+  });
+  document.getElementById('btn-replace').addEventListener('click', () => {
+    openSearchPanel(editorView);
+  });
+  document.getElementById('btn-goto').addEventListener('click', showGotoLineDialog);
+  document.getElementById('btn-fold-all').addEventListener('click', () => {
+    foldAll(editorView);
+  });
+  document.getElementById('btn-unfold-all').addEventListener('click', () => {
+    unfoldAll(editorView);
+  });
+  document.getElementById('btn-minimap').addEventListener('click', toggleMinimap);
+  document.getElementById('btn-sidebar-toggle').addEventListener('click', toggleSidebar);
 
   document.getElementById('btn-zoom-in').addEventListener('click', () => setFontSize(fontSize + 2));
   document.getElementById('btn-zoom-out').addEventListener('click', () => setFontSize(fontSize - 2));
@@ -749,7 +932,14 @@ function wireEvents() {
     window.electronAPI.onMenuNew(() => createTab(null, ''));
     window.electronAPI.onMenuSave(() => saveCurrentFile());
     window.electronAPI.onMenuSaveAs(() => saveCurrentFileAs());
+    window.electronAPI.onMenuFind(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuReplace(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuGotoLine(showGotoLineDialog);
     window.electronAPI.onMenuToggleWrap(toggleWrap);
+    window.electronAPI.onMenuToggleSidebar(toggleSidebar);
+    window.electronAPI.onMenuToggleMinimap(toggleMinimap);
+    window.electronAPI.onMenuFoldAll(() => foldAll(editorView));
+    window.electronAPI.onMenuUnfoldAll(() => unfoldAll(editorView));
     window.electronAPI.onMenuZoomIn(() => setFontSize(fontSize + 2));
     window.electronAPI.onMenuZoomOut(() => setFontSize(fontSize - 2));
     window.electronAPI.onMenuZoomReset(() => setFontSize(14));
@@ -762,5 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarTabs();
   initSidebarResize();
   initDragAndDrop();
+  initGotoLineDialog();
+  initMinimap();
   loadRecentFiles();
 });
