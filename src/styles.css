@@ -722,22 +722,26 @@ body.dragging-sidebar {
 /* Split View */
 #editor-area.split-view {
   display: flex;
+  flex-direction: row;
 }
 
 #editor-area.split-view #editor {
-  flex: 1;
-  border-right: 2px solid var(--char-black);
+  flex: none;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
 }
 
 #editor-area.split-view #editor-split {
   flex: 1;
   display: block;
+  height: 100%;
+  overflow: hidden;
 }
 
 #editor-split {
   display: none;
   height: 100%;
-  width: 100%;
 }
 
 #editor-split .cm-editor {
@@ -745,14 +749,89 @@ body.dragging-sidebar {
 }
 
 .split-gutter {
-  width: 4px;
+  width: 5px;
   cursor: col-resize;
-  background: transparent;
+  background: var(--char-black);
   flex-shrink: 0;
+  display: none;
 }
 
-.split-gutter:hover {
+#editor-area.split-view .split-gutter {
+  display: block;
+}
+
+.split-gutter:hover,
+body.dragging-split .split-gutter {
   background: var(--accent);
+}
+
+body.dragging-split {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Compare mode */
+.cm-compare-added {
+  background: rgba(80, 180, 80, 0.15);
+}
+
+.cm-compare-removed {
+  background: rgba(220, 60, 60, 0.15);
+}
+
+.cm-compare-changed {
+  background: rgba(220, 180, 40, 0.12);
+}
+
+.cm-compare-added-gutter {
+  color: #50b850;
+}
+
+.cm-compare-removed-gutter {
+  color: #dc4040;
+}
+
+.cm-compare-changed-gutter {
+  color: #dcb428;
+}
+
+#compare-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--verdigris-deep);
+  border-bottom: 1px solid var(--char-black);
+  font-size: 12px;
+  color: var(--text-active);
+}
+
+#compare-bar.hidden {
+  display: none;
+}
+
+#compare-bar span {
+  color: var(--text-secondary);
+}
+
+#compare-bar .compare-filename {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#compare-bar button {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--char-black);
+  color: var(--text-primary);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+#compare-bar button:hover {
+  background: var(--accent);
+  color: var(--char-black);
 }
 
 /* Light Theme - weathered parchment and pale verdigris */

@@ -18,6 +18,7 @@ import { java } from '@codemirror/lang-java';
 import { php } from '@codemirror/lang-php';
 import { rust } from '@codemirror/lang-rust';
 import { sql } from '@codemirror/lang-sql';
+import * as Diff from 'diff';
 
 const LANGUAGES = {
   '.js': { name: 'JavaScript', ext: javascript },
@@ -394,6 +395,8 @@ function initEditor() {
       wrapCompartment.of([]),
       fontCompartment.of([]),
       wikiLinkPlugin,
+      grammarPlugin,
+      comparePluginLeft,
       themeCompartment.of(oneDark),
       keymap.of([
         ...closeBracketsKeymap,
@@ -536,6 +539,297 @@ function flashAutoSaveIndicator() {
 }
 
 let proseMode = false;
+let grammarMatches = [];
+let grammarDecorations = Decoration.none;
+
+let leftCompareRanges = [];
+let rightCompareRanges = [];
+
+function buildCompareDecorations(view, ranges) {
+  const builder = new RangeSetBuilder();
+  const docLen = view.state.doc.length;
+  for (const range of ranges) {
+    if (range.from < docLen) {
+      const to = Math.min(range.to, docLen);
+      if (range.from < to) {
+        builder.add(range.from, to, Decoration.mark({ class: range.cls }));
+      }
+    }
+  }
+  return builder.finish();
+}
+
+const comparePluginLeft = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildCompareDecorations(view, leftCompareRanges);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildCompareDecorations(update.view, leftCompareRanges);
+    }
+  }
+}, { decorations: v => v.decorations });
+
+const grammarCompartment = new Compartment();
+
+function getGrammarClass(rule) {
+  if (!rule || !rule.category) return 'cm-grammar-error';
+  const cat = rule.category.id || '';
+  if (cat === 'TYPOS' || cat === 'SPELLING') return 'cm-grammar-typo';
+  if (cat === 'STYLE' || cat === 'REDUNDANCY' || cat === 'TYPOGRAPHY') return 'cm-grammar-style';
+  return 'cm-grammar-error';
+}
+
+function getTypeLabel(rule) {
+  if (!rule || !rule.category) return 'error';
+  const cat = rule.category.id || '';
+  if (cat === 'TYPOS' || cat === 'SPELLING') return 'typo';
+  if (cat === 'STYLE' || cat === 'REDUNDANCY' || cat === 'TYPOGRAPHY') return 'style';
+  return 'error';
+}
+
+function buildGrammarDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const docLen = view.state.doc.length;
+  const sorted = grammarMatches
+    .filter(m => m.offset < docLen && m.offset + m.length <= docLen)
+    .sort((a, b) => a.offset - b.offset);
+
+  for (const match of sorted) {
+    const cls = getGrammarClass(match.rule);
+    builder.add(
+      match.offset,
+      match.offset + match.length,
+      Decoration.mark({ class: cls })
+    );
+  }
+  return builder.finish();
+}
+
+const grammarPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildGrammarDecorations(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildGrammarDecorations(update.view);
+    }
+  }
+}, { decorations: v => v.decorations });
+
+async function runGrammarCheck() {
+  if (!window.electronAPI || !window.electronAPI.checkGrammar) return;
+
+  const text = proseMode
+    ? document.getElementById('prose-editor').value
+    : editorView.state.doc.toString();
+
+  if (!text.trim()) {
+    grammarMatches = [];
+    showGrammarResults([]);
+    return;
+  }
+
+  const statusEl = document.getElementById('grammar-status');
+  statusEl.textContent = 'Checking...';
+
+  const response = await window.electronAPI.checkGrammar({ text });
+
+  if (!response.success) {
+    statusEl.textContent = 'Error: ' + response.error;
+    return;
+  }
+
+  grammarMatches = response.result.matches || [];
+  statusEl.textContent = grammarMatches.length === 0
+    ? 'No issues found'
+    : `${grammarMatches.length} issue${grammarMatches.length > 1 ? 's' : ''}`;
+
+  if (!proseMode && editorView) {
+    editorView.dispatch({ effects: [] });
+  }
+
+  showGrammarResults(grammarMatches);
+
+  const panel = document.getElementById('grammar-panel');
+  panel.classList.remove('hidden');
+  document.getElementById('btn-grammar').classList.add('active');
+}
+
+function showGrammarResults(matches) {
+  const container = document.getElementById('grammar-results');
+  if (matches.length === 0) {
+    container.innerHTML = '<div style="padding: 12px; color: var(--text-secondary); text-align: center;">No grammar or spelling issues found.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  matches.forEach((match, index) => {
+    const item = document.createElement('div');
+    item.className = 'grammar-item';
+
+    const typeLabel = getTypeLabel(match.rule);
+
+    const contextText = match.context || {};
+    const ctxStr = contextText.text || '';
+    const ctxOffset = contextText.offset || 0;
+    const ctxLen = match.length;
+    const before = ctxStr.substring(0, ctxOffset);
+    const marked = ctxStr.substring(ctxOffset, ctxOffset + ctxLen);
+    const after = ctxStr.substring(ctxOffset + ctxLen);
+
+    const topFix = (match.replacements && match.replacements.length > 0)
+      ? match.replacements[0].value : null;
+
+    item.innerHTML = `
+      <span class="grammar-item-type ${typeLabel}">${typeLabel.toUpperCase()}</span>
+      <div class="grammar-item-body">
+        <div class="grammar-item-message">${match.message}</div>
+        <div class="grammar-item-context">${escapeHtml(before)}<mark>${escapeHtml(marked)}</mark>${escapeHtml(after)}</div>
+      </div>
+      ${topFix ? `<button class="grammar-item-fix" data-index="${index}">Fix: ${escapeHtml(topFix)}</button>` : ''}
+    `;
+
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('grammar-item-fix')) return;
+      jumpToGrammarMatch(match);
+    });
+
+    const fixBtn = item.querySelector('.grammar-item-fix');
+    if (fixBtn) {
+      fixBtn.addEventListener('click', () => applyGrammarFix(match, index));
+    }
+
+    container.appendChild(item);
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function jumpToGrammarMatch(match) {
+  if (proseMode) {
+    const textarea = document.getElementById('prose-editor');
+    textarea.focus();
+    textarea.setSelectionRange(match.offset, match.offset + match.length);
+  } else if (editorView) {
+    const pos = Math.min(match.offset, editorView.state.doc.length);
+    const end = Math.min(match.offset + match.length, editorView.state.doc.length);
+    editorView.dispatch({
+      selection: { anchor: pos, head: end },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    editorView.focus();
+  }
+}
+
+function applyGrammarFix(match, index) {
+  if (!match.replacements || match.replacements.length === 0) return;
+  const fix = match.replacements[0].value;
+
+  if (proseMode) {
+    const textarea = document.getElementById('prose-editor');
+    const text = textarea.value;
+    textarea.value = text.substring(0, match.offset) + fix + text.substring(match.offset + match.length);
+    markModified();
+  } else if (editorView) {
+    editorView.dispatch({
+      changes: { from: match.offset, to: match.offset + match.length, insert: fix },
+    });
+  }
+
+  grammarMatches.splice(index, 1);
+  const lenDiff = fix.length - match.length;
+  for (let i = index; i < grammarMatches.length; i++) {
+    if (grammarMatches[i].offset > match.offset) {
+      grammarMatches[i].offset += lenDiff;
+    }
+  }
+
+  if (!proseMode && editorView) {
+    editorView.dispatch({ effects: [] });
+  }
+
+  showGrammarResults(grammarMatches);
+  document.getElementById('grammar-status').textContent =
+    grammarMatches.length === 0 ? 'No issues found' : `${grammarMatches.length} issue${grammarMatches.length > 1 ? 's' : ''}`;
+}
+
+let proseFindMatches = [];
+let proseFindIndex = -1;
+
+function openProseFind() {
+  const bar = document.getElementById('prose-find-bar');
+  bar.classList.remove('hidden');
+  const input = document.getElementById('prose-find-input');
+  input.focus();
+  input.select();
+}
+
+function closeProseFind() {
+  document.getElementById('prose-find-bar').classList.add('hidden');
+  document.getElementById('prose-find-count').textContent = '';
+  proseFindMatches = [];
+  proseFindIndex = -1;
+}
+
+function proseFindAll(query) {
+  proseFindMatches = [];
+  proseFindIndex = -1;
+  const countEl = document.getElementById('prose-find-count');
+
+  if (!query) {
+    countEl.textContent = '';
+    return;
+  }
+
+  const textarea = document.getElementById('prose-editor');
+  const text = textarea.value.toLowerCase();
+  const q = query.toLowerCase();
+  let pos = 0;
+
+  while (true) {
+    const idx = text.indexOf(q, pos);
+    if (idx === -1) break;
+    proseFindMatches.push(idx);
+    pos = idx + 1;
+  }
+
+  countEl.textContent = proseFindMatches.length > 0
+    ? `${proseFindMatches.length} found`
+    : 'No results';
+
+  if (proseFindMatches.length > 0) {
+    proseFindIndex = 0;
+    proseFindGoTo(0);
+  }
+}
+
+function proseFindGoTo(index) {
+  if (proseFindMatches.length === 0) return;
+  const textarea = document.getElementById('prose-editor');
+  const query = document.getElementById('prose-find-input').value;
+  const pos = proseFindMatches[index];
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos + query.length);
+  document.getElementById('prose-find-count').textContent =
+    `${index + 1} / ${proseFindMatches.length}`;
+}
+
+function proseFindNext() {
+  if (proseFindMatches.length === 0) return;
+  proseFindIndex = (proseFindIndex + 1) % proseFindMatches.length;
+  proseFindGoTo(proseFindIndex);
+}
+
+function proseFindPrev() {
+  if (proseFindMatches.length === 0) return;
+  proseFindIndex = (proseFindIndex - 1 + proseFindMatches.length) % proseFindMatches.length;
+  proseFindGoTo(proseFindIndex);
+}
 
 function toggleProseMode() {
   const editorEl = document.getElementById('editor');
@@ -965,80 +1259,257 @@ function lineOperation(type) {
 // Split view
 let splitView = false;
 let splitEditorView = null;
+let compareMode = false;
+
+function createSplitEditor(content, langExt, readOnly) {
+  const splitEl = document.getElementById('editor-split');
+  splitEl.innerHTML = '';
+
+  const extensions = [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    history(),
+    foldGutter(),
+    drawSelection(),
+    dropCursor(),
+    EditorState.allowMultipleSelections.of(true),
+    indentOnInput(),
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    bracketMatching(),
+    closeBrackets(),
+    autocompletion(),
+    rectangularSelection(),
+    crosshairCursor(),
+    highlightActiveLine(),
+    highlightSelectionMatches(),
+    languageCompartment.of(langExt),
+    wrapCompartment.of([]),
+    fontCompartment.of([]),
+    wikiLinkPlugin,
+    ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.decorations = buildCompareDecorations(view, rightCompareRanges);
+      }
+      update(update) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildCompareDecorations(update.view, rightCompareRanges);
+        }
+      }
+    }, { decorations: v => v.decorations }),
+    isDarkTheme ? oneDark : [],
+    keymap.of([
+      ...closeBracketsKeymap,
+      ...defaultKeymap,
+      ...searchKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+      ...completionKeymap,
+      indentWithTab,
+    ]),
+  ];
+
+  if (readOnly) {
+    extensions.push(EditorState.readOnly.of(true));
+  } else {
+    extensions.push(
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged && !compareMode) {
+          const mainDoc = editorView.state.doc.toString();
+          const splitDoc = splitEditorView.state.doc.toString();
+          if (mainDoc !== splitDoc) {
+            editorView.dispatch({
+              changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
+            });
+          }
+        }
+      })
+    );
+  }
+
+  const splitState = EditorState.create({ doc: content, extensions });
+
+  splitEditorView = new EditorView({
+    state: splitState,
+    parent: splitEl,
+  });
+
+  return splitEditorView;
+}
 
 function toggleSplitView() {
+  if (compareMode) {
+    closeCompare();
+    return;
+  }
+
   splitView = !splitView;
   const editorArea = document.getElementById('editor-area');
-  const splitEl = document.getElementById('editor-split');
-  const gutter = document.getElementById('split-gutter');
+  const editorEl = document.getElementById('editor');
 
   if (splitView) {
     editorArea.classList.add('split-view');
+    editorEl.style.width = '50%';
     if (!splitEditorView) {
       const tab = getActiveTab();
       const content = tab ? tab.content : '';
       const langExt = tab ? getLanguageExtension(tab.filePath) : [];
-
-      const splitState = EditorState.create({
-        doc: content,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          languageCompartment.of(langExt),
-          wrapCompartment.of([]),
-          fontCompartment.of([]),
-          wikiLinkPlugin,
-          isDarkTheme ? oneDark : [],
-          keymap.of([
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            indentWithTab,
-          ]),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const mainDoc = editorView.state.doc.toString();
-              const splitDoc = splitEditorView.state.doc.toString();
-              if (mainDoc !== splitDoc) {
-                editorView.dispatch({
-                  changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
-                });
-              }
-            }
-          }),
-        ],
-      });
-
-      splitEditorView = new EditorView({
-        state: splitState,
-        parent: splitEl,
-      });
+      createSplitEditor(content, langExt, false);
     }
   } else {
     editorArea.classList.remove('split-view');
+    editorEl.style.width = '';
     if (splitEditorView) {
       splitEditorView.destroy();
       splitEditorView = null;
     }
   }
+}
+
+function initSplitGutter() {
+  const gutter = document.getElementById('split-gutter');
+  let dragging = false;
+
+  gutter.addEventListener('mousedown', (e) => {
+    if (!splitView && !compareMode) return;
+    e.preventDefault();
+    dragging = true;
+    document.body.classList.add('dragging-split');
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const editorArea = document.getElementById('editor-area');
+    const rect = editorArea.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(20, Math.min(80, (x / rect.width) * 100));
+    document.getElementById('editor').style.width = pct + '%';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('dragging-split');
+  });
+}
+
+let pendingCompare = false;
+
+function openCompare() {
+  if (!window.electronAPI) return;
+  pendingCompare = true;
+  window.electronAPI.openFile();
+}
+
+function startCompare(rightPath, rightContent) {
+  const tab = getActiveTab();
+  const leftContent = editorView.state.doc.toString();
+  const leftName = tab && tab.filePath ? getFileName(tab.filePath) : 'Untitled';
+  const rightName = getFileName(rightPath);
+
+  compareMode = true;
+  splitView = true;
+
+  const editorArea = document.getElementById('editor-area');
+  editorArea.classList.add('split-view');
+  document.getElementById('editor').style.width = '50%';
+
+  computeCompareRanges(leftContent, rightContent);
+
+  editorView.dispatch({ effects: [] });
+
+  const langExt = getLanguageExtension(rightPath);
+  createSplitEditor(rightContent, langExt, true);
+
+  document.getElementById('compare-left-name').textContent = leftName;
+  document.getElementById('compare-right-name').textContent = rightName;
+
+  const added = leftCompareRanges.length === 0 && rightCompareRanges.length === 0
+    ? 0 : rightCompareRanges.length;
+  const removed = leftCompareRanges.length;
+  document.getElementById('compare-stats').textContent =
+    `+${rightCompareRanges.length} / -${leftCompareRanges.length} regions`;
+
+  document.getElementById('compare-bar').classList.remove('hidden');
+
+  syncCompareScroll();
+}
+
+function computeCompareRanges(leftContent, rightContent) {
+  const changes = Diff.diffLines(leftContent, rightContent);
+
+  leftCompareRanges = [];
+  rightCompareRanges = [];
+
+  let leftOffset = 0;
+  let rightOffset = 0;
+
+  for (const part of changes) {
+    const len = part.value.length;
+
+    if (part.added) {
+      rightCompareRanges.push({
+        from: rightOffset,
+        to: rightOffset + len,
+        cls: 'cm-compare-added',
+      });
+      rightOffset += len;
+    } else if (part.removed) {
+      leftCompareRanges.push({
+        from: leftOffset,
+        to: leftOffset + len,
+        cls: 'cm-compare-removed',
+      });
+      leftOffset += len;
+    } else {
+      leftOffset += len;
+      rightOffset += len;
+    }
+  }
+}
+
+function syncCompareScroll() {
+  if (!editorView || !splitEditorView) return;
+
+  let syncing = false;
+
+  const leftScroller = editorView.scrollDOM;
+  const rightScroller = splitEditorView.scrollDOM;
+
+  leftScroller.addEventListener('scroll', () => {
+    if (syncing) return;
+    syncing = true;
+    rightScroller.scrollTop = leftScroller.scrollTop;
+    syncing = false;
+  });
+
+  rightScroller.addEventListener('scroll', () => {
+    if (syncing) return;
+    syncing = true;
+    leftScroller.scrollTop = rightScroller.scrollTop;
+    syncing = false;
+  });
+}
+
+function closeCompare() {
+  compareMode = false;
+  splitView = false;
+
+  leftCompareRanges = [];
+  rightCompareRanges = [];
+
+  editorView.dispatch({ effects: [] });
+
+  const editorArea = document.getElementById('editor-area');
+  editorArea.classList.remove('split-view');
+  document.getElementById('editor').style.width = '';
+
+  if (splitEditorView) {
+    splitEditorView.destroy();
+    splitEditorView = null;
+  }
+
+  document.getElementById('compare-bar').classList.add('hidden');
 }
 
 // Theme toggle
@@ -1159,12 +1630,20 @@ function wireEvents() {
     markModified();
   });
 
+  document.getElementById('btn-compare').addEventListener('click', openCompare);
+  document.getElementById('compare-close').addEventListener('click', closeCompare);
+
   document.getElementById('btn-open-folder').addEventListener('click', () => {
     if (window.electronAPI) window.electronAPI.openFolder();
   });
 
   if (window.electronAPI) {
     window.electronAPI.onFileOpened(({ filePath, content }) => {
+      if (pendingCompare) {
+        pendingCompare = false;
+        startCompare(filePath, content);
+        return;
+      }
       const existing = tabs.find(t => t.filePath === filePath);
       if (existing) {
         switchToTab(existing.id);
@@ -1203,6 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireEvents();
   initSidebarTabs();
   initSidebarResize();
+  initSplitGutter();
   initDragAndDrop();
   initGotoLineDialog();
   initMinimap();

@@ -60,6 +60,9 @@
     <span id="autosave-indicator" title="Auto-save is active">Auto-save: ON</span>
     <span class="toolbar-separator"></span>
     <button id="btn-prose" title="Toggle Prose Mode for Grammarly">Prose</button>
+    <button id="btn-grammar" title="Check Grammar (LanguageTool)">Grammar</button>
+    <span class="toolbar-separator"></span>
+    <button id="btn-compare" title="Compare Files">Compare</button>
   </div>
 
   <div id="tab-bar">
@@ -97,6 +100,23 @@
         <canvas id="minimap-canvas"></canvas>
       </div>
     </div>
+  </div>
+
+  <div id="compare-bar" class="hidden">
+    <span>Comparing:</span>
+    <span class="compare-filename" id="compare-left-name">Left</span>
+    <span>vs</span>
+    <span class="compare-filename" id="compare-right-name">Right</span>
+    <span id="compare-stats"></span>
+    <button id="compare-close">Close Compare</button>
+  </div>
+
+  <div id="prose-find-bar" class="hidden">
+    <input type="text" id="prose-find-input" placeholder="Find...">
+    <span id="prose-find-count"></span>
+    <button id="prose-find-prev" title="Previous">&uarr;</button>
+    <button id="prose-find-next" title="Next">&darr;</button>
+    <button id="prose-find-close" title="Close">&times;</button>
   </div>
 
   <div id="goto-dialog" class="dialog-overlay hidden">
