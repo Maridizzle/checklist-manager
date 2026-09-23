@@ -340,6 +340,51 @@ ipcMain.handle('track-recent-file', async (event, { filePath }) => {
   return { success: true };
 });
 
+ipcMain.handle('check-grammar', async (event, { text, language }) => {
+  const https = require('https');
+  const querystring = require('querystring');
+
+  const postData = querystring.stringify({
+    text,
+    language: language || 'en-US',
+  });
+
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'api.languagetool.org',
+      port: 443,
+      path: '/v2/check',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ success: true, result: JSON.parse(data) });
+        } catch (err) {
+          resolve({ success: false, error: 'Failed to parse response' });
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve({ success: false, error: 'Request timed out' });
+    });
+
+    req.write(postData);
+    req.end();
+  });
+});
+
 ipcMain.handle('set-title', async (event, { title }) => {
   if (mainWindow) {
     mainWindow.setTitle(title);

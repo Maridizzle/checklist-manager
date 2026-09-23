@@ -394,6 +394,7 @@ function initEditor() {
       wrapCompartment.of([]),
       fontCompartment.of([]),
       wikiLinkPlugin,
+      grammarPlugin,
       themeCompartment.of(oneDark),
       keymap.of([
         ...closeBracketsKeymap,
@@ -536,6 +537,196 @@ function flashAutoSaveIndicator() {
 }
 
 let proseMode = false;
+let grammarMatches = [];
+let grammarDecorations = Decoration.none;
+
+const grammarCompartment = new Compartment();
+
+function getGrammarClass(rule) {
+  if (!rule || !rule.category) return 'cm-grammar-error';
+  const cat = rule.category.id || '';
+  if (cat === 'TYPOS' || cat === 'SPELLING') return 'cm-grammar-typo';
+  if (cat === 'STYLE' || cat === 'REDUNDANCY' || cat === 'TYPOGRAPHY') return 'cm-grammar-style';
+  return 'cm-grammar-error';
+}
+
+function getTypeLabel(rule) {
+  if (!rule || !rule.category) return 'error';
+  const cat = rule.category.id || '';
+  if (cat === 'TYPOS' || cat === 'SPELLING') return 'typo';
+  if (cat === 'STYLE' || cat === 'REDUNDANCY' || cat === 'TYPOGRAPHY') return 'style';
+  return 'error';
+}
+
+function buildGrammarDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const docLen = view.state.doc.length;
+  const sorted = grammarMatches
+    .filter(m => m.offset < docLen && m.offset + m.length <= docLen)
+    .sort((a, b) => a.offset - b.offset);
+
+  for (const match of sorted) {
+    const cls = getGrammarClass(match.rule);
+    builder.add(
+      match.offset,
+      match.offset + match.length,
+      Decoration.mark({ class: cls })
+    );
+  }
+  return builder.finish();
+}
+
+const grammarPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildGrammarDecorations(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildGrammarDecorations(update.view);
+    }
+  }
+}, { decorations: v => v.decorations });
+
+async function runGrammarCheck() {
+  if (!window.electronAPI || !window.electronAPI.checkGrammar) return;
+
+  const text = proseMode
+    ? document.getElementById('prose-editor').value
+    : editorView.state.doc.toString();
+
+  if (!text.trim()) {
+    grammarMatches = [];
+    showGrammarResults([]);
+    return;
+  }
+
+  const statusEl = document.getElementById('grammar-status');
+  statusEl.textContent = 'Checking...';
+
+  const response = await window.electronAPI.checkGrammar({ text });
+
+  if (!response.success) {
+    statusEl.textContent = 'Error: ' + response.error;
+    return;
+  }
+
+  grammarMatches = response.result.matches || [];
+  statusEl.textContent = grammarMatches.length === 0
+    ? 'No issues found'
+    : `${grammarMatches.length} issue${grammarMatches.length > 1 ? 's' : ''}`;
+
+  if (!proseMode && editorView) {
+    editorView.dispatch({ effects: [] });
+  }
+
+  showGrammarResults(grammarMatches);
+
+  const panel = document.getElementById('grammar-panel');
+  panel.classList.remove('hidden');
+  document.getElementById('btn-grammar').classList.add('active');
+}
+
+function showGrammarResults(matches) {
+  const container = document.getElementById('grammar-results');
+  if (matches.length === 0) {
+    container.innerHTML = '<div style="padding: 12px; color: var(--text-secondary); text-align: center;">No grammar or spelling issues found.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  matches.forEach((match, index) => {
+    const item = document.createElement('div');
+    item.className = 'grammar-item';
+
+    const typeLabel = getTypeLabel(match.rule);
+
+    const contextText = match.context || {};
+    const ctxStr = contextText.text || '';
+    const ctxOffset = contextText.offset || 0;
+    const ctxLen = match.length;
+    const before = ctxStr.substring(0, ctxOffset);
+    const marked = ctxStr.substring(ctxOffset, ctxOffset + ctxLen);
+    const after = ctxStr.substring(ctxOffset + ctxLen);
+
+    const topFix = (match.replacements && match.replacements.length > 0)
+      ? match.replacements[0].value : null;
+
+    item.innerHTML = `
+      <span class="grammar-item-type ${typeLabel}">${typeLabel.toUpperCase()}</span>
+      <div class="grammar-item-body">
+        <div class="grammar-item-message">${match.message}</div>
+        <div class="grammar-item-context">${escapeHtml(before)}<mark>${escapeHtml(marked)}</mark>${escapeHtml(after)}</div>
+      </div>
+      ${topFix ? `<button class="grammar-item-fix" data-index="${index}">Fix: ${escapeHtml(topFix)}</button>` : ''}
+    `;
+
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('grammar-item-fix')) return;
+      jumpToGrammarMatch(match);
+    });
+
+    const fixBtn = item.querySelector('.grammar-item-fix');
+    if (fixBtn) {
+      fixBtn.addEventListener('click', () => applyGrammarFix(match, index));
+    }
+
+    container.appendChild(item);
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function jumpToGrammarMatch(match) {
+  if (proseMode) {
+    const textarea = document.getElementById('prose-editor');
+    textarea.focus();
+    textarea.setSelectionRange(match.offset, match.offset + match.length);
+  } else if (editorView) {
+    const pos = Math.min(match.offset, editorView.state.doc.length);
+    const end = Math.min(match.offset + match.length, editorView.state.doc.length);
+    editorView.dispatch({
+      selection: { anchor: pos, head: end },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    editorView.focus();
+  }
+}
+
+function applyGrammarFix(match, index) {
+  if (!match.replacements || match.replacements.length === 0) return;
+  const fix = match.replacements[0].value;
+
+  if (proseMode) {
+    const textarea = document.getElementById('prose-editor');
+    const text = textarea.value;
+    textarea.value = text.substring(0, match.offset) + fix + text.substring(match.offset + match.length);
+    markModified();
+  } else if (editorView) {
+    editorView.dispatch({
+      changes: { from: match.offset, to: match.offset + match.length, insert: fix },
+    });
+  }
+
+  grammarMatches.splice(index, 1);
+  const lenDiff = fix.length - match.length;
+  for (let i = index; i < grammarMatches.length; i++) {
+    if (grammarMatches[i].offset > match.offset) {
+      grammarMatches[i].offset += lenDiff;
+    }
+  }
+
+  if (!proseMode && editorView) {
+    editorView.dispatch({ effects: [] });
+  }
+
+  showGrammarResults(grammarMatches);
+  document.getElementById('grammar-status').textContent =
+    grammarMatches.length === 0 ? 'No issues found' : `${grammarMatches.length} issue${grammarMatches.length > 1 ? 's' : ''}`;
+}
 
 function toggleProseMode() {
   const editorEl = document.getElementById('editor');
@@ -1154,6 +1345,21 @@ function wireEvents() {
   });
 
   document.getElementById('btn-prose').addEventListener('click', toggleProseMode);
+
+  document.getElementById('btn-grammar').addEventListener('click', () => {
+    const panel = document.getElementById('grammar-panel');
+    if (panel.classList.contains('hidden')) {
+      runGrammarCheck();
+    } else {
+      panel.classList.add('hidden');
+      document.getElementById('btn-grammar').classList.remove('active');
+    }
+  });
+
+  document.getElementById('grammar-close').addEventListener('click', () => {
+    document.getElementById('grammar-panel').classList.add('hidden');
+    document.getElementById('btn-grammar').classList.remove('active');
+  });
 
   document.getElementById('prose-editor').addEventListener('input', () => {
     markModified();

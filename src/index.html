@@ -60,6 +60,7 @@
     <span id="autosave-indicator" title="Auto-save is active">Auto-save: ON</span>
     <span class="toolbar-separator"></span>
     <button id="btn-prose" title="Toggle Prose Mode for Grammarly">Prose</button>
+    <button id="btn-grammar" title="Check Grammar (LanguageTool)">Grammar</button>
   </div>
 
   <div id="tab-bar">
@@ -108,6 +109,15 @@
         <button id="goto-cancel">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <div id="grammar-panel" class="hidden">
+    <div id="grammar-panel-header">
+      <span>Grammar Check</span>
+      <span id="grammar-status"></span>
+      <button id="grammar-close" title="Close">&times;</button>
+    </div>
+    <div id="grammar-results"></div>
   </div>
 
   <div id="status-bar">
