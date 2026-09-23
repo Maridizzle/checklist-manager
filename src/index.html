@@ -16,6 +16,39 @@
     <button id="btn-wrap" title="Toggle Word Wrap (Alt+Z)">Wrap</button>
     <button id="btn-zoom-in" title="Zoom In (Ctrl+=)">A+</button>
     <button id="btn-zoom-out" title="Zoom Out (Ctrl+-)">A-</button>
+    <span class="toolbar-separator"></span>
+    <label class="toolbar-label" for="font-select">Font:</label>
+    <select id="font-select" title="Editor Font">
+      <option value="'Consolas', monospace">Consolas</option>
+      <option value="'Fira Code', monospace">Fira Code</option>
+      <option value="'Source Code Pro', monospace">Source Code Pro</option>
+      <option value="'Courier New', monospace">Courier New</option>
+      <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+      <option value="'Ubuntu Mono', monospace">Ubuntu Mono</option>
+      <option value="'Cascadia Code', monospace">Cascadia Code</option>
+      <option value="'Roboto Mono', monospace">Roboto Mono</option>
+      <option value="'Arial', sans-serif">Arial</option>
+      <option value="'Georgia', serif">Georgia</option>
+      <option value="'Times New Roman', serif">Times New Roman</option>
+      <option value="'Verdana', sans-serif">Verdana</option>
+    </select>
+    <span class="toolbar-separator"></span>
+    <label class="toolbar-label" for="bg-color">BG:</label>
+    <input type="color" id="bg-color" value="#282c34" title="Editor Background Color">
+    <div id="bg-presets" title="Background Color Presets">
+      <span class="bg-preset" data-color="#282c34" title="One Dark"></span>
+      <span class="bg-preset" data-color="#1e1e1e" title="VS Dark"></span>
+      <span class="bg-preset" data-color="#002b36" title="Solarized Dark"></span>
+      <span class="bg-preset" data-color="#fdf6e3" title="Solarized Light"></span>
+      <span class="bg-preset" data-color="#ffffff" title="White"></span>
+      <span class="bg-preset" data-color="#f5f5dc" title="Beige"></span>
+      <span class="bg-preset" data-color="#1a1b26" title="Tokyo Night"></span>
+      <span class="bg-preset" data-color="#0d1117" title="GitHub Dark"></span>
+      <span class="bg-preset" data-color="#2e3440" title="Nord"></span>
+      <span class="bg-preset" data-color="#fbf1c7" title="Gruvbox Light"></span>
+    </div>
+    <span class="toolbar-separator"></span>
+    <span id="autosave-indicator" title="Auto-save is active">Auto-save: ON</span>
   </div>
 
   <div id="tab-bar">

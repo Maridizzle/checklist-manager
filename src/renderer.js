@@ -1,5 +1,5 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
+import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -57,6 +57,71 @@ let tabCounter = 0;
 let editorView = null;
 let fontSize = 14;
 let currentFolderPath = null;
+let autoSaveTimer = null;
+const AUTO_SAVE_DELAY = 2000;
+
+const fontCompartment = new Compartment();
+
+const wikiLinkMark = Decoration.mark({ class: 'cm-wiki-link' });
+const wikiBracketMark = Decoration.mark({ class: 'cm-wiki-bracket' });
+
+function buildWikiLinkDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const doc = view.state.doc;
+  const regex = /\[\[([^\]]+)\]\]/g;
+
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    let match;
+    regex.lastIndex = 0;
+    while ((match = regex.exec(line.text)) !== null) {
+      const from = line.from + match.index;
+      const bracketOpenEnd = from + 2;
+      const linkStart = bracketOpenEnd;
+      const linkEnd = linkStart + match[1].length;
+      const bracketCloseEnd = linkEnd + 2;
+
+      builder.add(from, bracketOpenEnd, wikiBracketMark);
+      builder.add(linkStart, linkEnd, wikiLinkMark);
+      builder.add(linkEnd, bracketCloseEnd, wikiBracketMark);
+    }
+  }
+  return builder.finish();
+}
+
+const wikiLinkPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildWikiLinkDecorations(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildWikiLinkDecorations(update.view);
+    }
+  }
+}, {
+  decorations: v => v.decorations,
+  eventHandlers: {
+    click(e, view) {
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos === null) return;
+
+      const doc = view.state.doc;
+      const line = doc.lineAt(pos);
+      const regex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      while ((match = regex.exec(line.text)) !== null) {
+        const linkStart = line.from + match.index + 2;
+        const linkEnd = linkStart + match[1].length;
+        if (pos >= linkStart && pos <= linkEnd) {
+          if (e.ctrlKey || e.metaKey) {
+            resolveWikiLink(match[1]);
+            return;
+          }
+        }
+      }
+    }
+  }
+});
 
 function getFileExtension(filePath) {
   if (!filePath) return '';
@@ -220,6 +285,9 @@ function markModified() {
   tab.modified = currentContent !== tab.savedContent;
   renderTabs();
   updateStatusBar();
+  if (tab.modified && tab.filePath) {
+    scheduleAutoSave();
+  }
 }
 
 async function saveCurrentFile() {
@@ -291,6 +359,8 @@ function initEditor() {
       highlightSelectionMatches(),
       languageCompartment.of([]),
       wrapCompartment.of([]),
+      fontCompartment.of([]),
+      wikiLinkPlugin,
       oneDark,
       keymap.of([
         ...closeBracketsKeymap,
@@ -318,6 +388,140 @@ function initEditor() {
   });
 
   createTab(null, '');
+}
+
+async function resolveWikiLink(linkText) {
+  const tab = getActiveTab();
+  if (!tab || !window.electronAPI) return;
+
+  let searchDir = currentFolderPath;
+  if (!searchDir && tab.filePath) {
+    searchDir = tab.filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  }
+  if (!searchDir) return;
+
+  const candidates = [
+    linkText,
+    linkText + '.txt',
+    linkText + '.md',
+    linkText + '.html',
+    linkText + '.js',
+    linkText + '.py',
+    linkText + '.json',
+  ];
+
+  for (const candidate of candidates) {
+    const fullPath = searchDir + '/' + candidate;
+    const result = await window.electronAPI.readFile({ filePath: fullPath });
+    if (result.success) {
+      await window.electronAPI.trackRecentFile({ filePath: fullPath });
+      const existing = tabs.find(t => t.filePath === fullPath);
+      if (existing) {
+        switchToTab(existing.id);
+      } else {
+        createTab(fullPath, result.content);
+      }
+      return;
+    }
+  }
+
+  await searchSubdirectories(searchDir, linkText);
+}
+
+async function searchSubdirectories(baseDir, linkText) {
+  if (!window.electronAPI) return;
+
+  const result = await window.electronAPI.readDirectory({ dirPath: baseDir });
+  if (!result.success) return;
+
+  for (const item of result.items) {
+    if (!item.isDirectory) {
+      const nameNoExt = item.name.replace(/\.[^.]+$/, '');
+      if (nameNoExt.toLowerCase() === linkText.toLowerCase() || item.name.toLowerCase() === linkText.toLowerCase()) {
+        await openFileFromPath(item.path);
+        return;
+      }
+    }
+  }
+
+  for (const item of result.items) {
+    if (item.isDirectory) {
+      const found = await searchSubdirForFile(item.path, linkText);
+      if (found) {
+        await openFileFromPath(found);
+        return;
+      }
+    }
+  }
+}
+
+async function searchSubdirForFile(dirPath, linkText) {
+  if (!window.electronAPI) return null;
+
+  const result = await window.electronAPI.readDirectory({ dirPath });
+  if (!result.success) return null;
+
+  for (const item of result.items) {
+    if (!item.isDirectory) {
+      const nameNoExt = item.name.replace(/\.[^.]+$/, '');
+      if (nameNoExt.toLowerCase() === linkText.toLowerCase() || item.name.toLowerCase() === linkText.toLowerCase()) {
+        return item.path;
+      }
+    }
+  }
+  return null;
+}
+
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    const tab = getActiveTab();
+    if (!tab || !tab.filePath || !tab.modified) return;
+    if (!window.electronAPI) return;
+
+    const content = editorView.state.doc.toString();
+    const result = await window.electronAPI.saveFile({ filePath: tab.filePath, content });
+    if (result.success) {
+      tab.savedContent = content;
+      tab.modified = false;
+      renderTabs();
+      updateStatusBar();
+      flashAutoSaveIndicator();
+    }
+  }, AUTO_SAVE_DELAY);
+}
+
+function flashAutoSaveIndicator() {
+  const indicator = document.getElementById('autosave-indicator');
+  indicator.textContent = 'Saved!';
+  indicator.style.color = '#4ec969';
+  setTimeout(() => {
+    indicator.textContent = 'Auto-save: ON';
+    indicator.style.color = '#73c991';
+  }, 1500);
+}
+
+function setEditorFont(fontFamily) {
+  editorView.dispatch({
+    effects: fontCompartment.reconfigure(
+      EditorView.theme({ '.cm-content, .cm-gutters': { fontFamily } })
+    ),
+  });
+}
+
+function setEditorBackground(color) {
+  editorView.dispatch({
+    effects: fontCompartment.reconfigure(
+      EditorView.theme({
+        '.cm-content, .cm-gutters': {
+          fontFamily: document.getElementById('font-select').value,
+        },
+        '&': { backgroundColor: color },
+        '.cm-gutters': { backgroundColor: color },
+      })
+    ),
+  });
+  document.getElementById('bg-color').value = color;
 }
 
 async function openFileFromPath(filePath) {
@@ -508,6 +712,21 @@ function wireEvents() {
 
   document.getElementById('btn-zoom-in').addEventListener('click', () => setFontSize(fontSize + 2));
   document.getElementById('btn-zoom-out').addEventListener('click', () => setFontSize(fontSize - 2));
+
+  document.getElementById('font-select').addEventListener('change', (e) => {
+    setEditorFont(e.target.value);
+  });
+
+  document.getElementById('bg-color').addEventListener('input', (e) => {
+    setEditorBackground(e.target.value);
+  });
+
+  document.querySelectorAll('.bg-preset').forEach(el => {
+    el.style.backgroundColor = el.dataset.color;
+    el.addEventListener('click', () => {
+      setEditorBackground(el.dataset.color);
+    });
+  });
 
   document.getElementById('btn-open-folder').addEventListener('click', () => {
     if (window.electronAPI) window.electronAPI.openFolder();
