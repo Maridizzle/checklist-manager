@@ -361,7 +361,7 @@ function initEditor() {
       wrapCompartment.of([]),
       fontCompartment.of([]),
       wikiLinkPlugin,
-      oneDark,
+      themeCompartment.of(oneDark),
       keymap.of([
         ...closeBracketsKeymap,
         ...defaultKeymap,
@@ -821,6 +821,187 @@ function initMinimap() {
   }, 500);
 }
 
+// Text transformations
+function transformText(type) {
+  if (!editorView) return;
+  const state = editorView.state;
+  const { from, to } = state.selection.main;
+  if (from === to) return;
+
+  const selected = state.sliceDoc(from, to);
+  let result;
+  switch (type) {
+    case 'uppercase':
+      result = selected.toUpperCase();
+      break;
+    case 'lowercase':
+      result = selected.toLowerCase();
+      break;
+    case 'titlecase':
+      result = selected.replace(/\b\w/g, c => c.toUpperCase());
+      break;
+    case 'camelcase':
+      result = selected
+        .replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '')
+        .replace(/^[A-Z]/, c => c.toLowerCase());
+      break;
+    default:
+      return;
+  }
+  editorView.dispatch({ changes: { from, to, insert: result } });
+}
+
+// Line operations
+function lineOperation(type) {
+  if (!editorView) return;
+  const state = editorView.state;
+  const doc = state.doc;
+  const { from, to } = state.selection.main;
+
+  let startLine, endLine;
+  if (from === to) {
+    startLine = 1;
+    endLine = doc.lines;
+  } else {
+    startLine = doc.lineAt(from).number;
+    endLine = doc.lineAt(to).number;
+  }
+
+  const lines = [];
+  for (let i = startLine; i <= endLine; i++) {
+    lines.push(doc.line(i).text);
+  }
+
+  let result;
+  switch (type) {
+    case 'sort-asc':
+      result = [...lines].sort((a, b) => a.localeCompare(b));
+      break;
+    case 'sort-desc':
+      result = [...lines].sort((a, b) => b.localeCompare(a));
+      break;
+    case 'remove-dupes':
+      result = [...new Set(lines)];
+      break;
+    case 'remove-empty':
+      result = lines.filter(l => l.trim().length > 0);
+      break;
+    case 'trim':
+      result = lines.map(l => l.trimEnd());
+      break;
+    case 'reverse':
+      result = [...lines].reverse();
+      break;
+    default:
+      return;
+  }
+
+  const rangeFrom = doc.line(startLine).from;
+  const rangeTo = doc.line(endLine).to;
+  editorView.dispatch({ changes: { from: rangeFrom, to: rangeTo, insert: result.join('\n') } });
+}
+
+// Split view
+let splitView = false;
+let splitEditorView = null;
+
+function toggleSplitView() {
+  splitView = !splitView;
+  const editorArea = document.getElementById('editor-area');
+  const splitEl = document.getElementById('editor-split');
+  const gutter = document.getElementById('split-gutter');
+
+  if (splitView) {
+    editorArea.classList.add('split-view');
+    if (!splitEditorView) {
+      const tab = getActiveTab();
+      const content = tab ? tab.content : '';
+      const langExt = tab ? getLanguageExtension(tab.filePath) : [];
+
+      const splitState = EditorState.create({
+        doc: content,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          foldGutter(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          bracketMatching(),
+          closeBrackets(),
+          autocompletion(),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          languageCompartment.of(langExt),
+          wrapCompartment.of([]),
+          fontCompartment.of([]),
+          wikiLinkPlugin,
+          isDarkTheme ? oneDark : [],
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...searchKeymap,
+            ...historyKeymap,
+            ...foldKeymap,
+            ...completionKeymap,
+            indentWithTab,
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const mainDoc = editorView.state.doc.toString();
+              const splitDoc = splitEditorView.state.doc.toString();
+              if (mainDoc !== splitDoc) {
+                editorView.dispatch({
+                  changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
+                });
+              }
+            }
+          }),
+        ],
+      });
+
+      splitEditorView = new EditorView({
+        state: splitState,
+        parent: splitEl,
+      });
+    }
+  } else {
+    editorArea.classList.remove('split-view');
+    if (splitEditorView) {
+      splitEditorView.destroy();
+      splitEditorView = null;
+    }
+  }
+}
+
+// Theme toggle
+let isDarkTheme = true;
+const themeCompartment = new Compartment();
+
+function toggleTheme() {
+  isDarkTheme = !isDarkTheme;
+  document.body.classList.toggle('light-theme', !isDarkTheme);
+
+  editorView.dispatch({
+    effects: themeCompartment.reconfigure(isDarkTheme ? oneDark : []),
+  });
+
+  if (splitEditorView) {
+    splitEditorView.destroy();
+    splitEditorView = null;
+    if (splitView) {
+      toggleSplitView();
+      toggleSplitView();
+    }
+  }
+}
+
 let sidebarVisible = true;
 
 function toggleSidebar() {
@@ -943,6 +1124,10 @@ function wireEvents() {
     window.electronAPI.onMenuZoomIn(() => setFontSize(fontSize + 2));
     window.electronAPI.onMenuZoomOut(() => setFontSize(fontSize - 2));
     window.electronAPI.onMenuZoomReset(() => setFontSize(14));
+    window.electronAPI.onMenuTransform((type) => transformText(type));
+    window.electronAPI.onMenuLineOp((type) => lineOperation(type));
+    window.electronAPI.onMenuToggleSplit(toggleSplitView);
+    window.electronAPI.onMenuToggleTheme(toggleTheme);
   }
 }
 

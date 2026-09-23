@@ -136,7 +136,66 @@ function createWindow() {
           click: () => mainWindow.webContents.send('menu-zoom-reset'),
         },
         { type: 'separator' },
+        {
+          label: 'Toggle Split View',
+          accelerator: 'CmdOrCtrl+\\',
+          click: () => mainWindow.webContents.send('menu-toggle-split'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle Theme (Dark/Light)',
+          click: () => mainWindow.webContents.send('menu-toggle-theme'),
+        },
+        { type: 'separator' },
         { label: 'Toggle Dev Tools', accelerator: 'F12', role: 'toggleDevTools' },
+      ],
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        {
+          label: 'UPPERCASE',
+          accelerator: 'CmdOrCtrl+Shift+U',
+          click: () => mainWindow.webContents.send('menu-transform', 'uppercase'),
+        },
+        {
+          label: 'lowercase',
+          accelerator: 'CmdOrCtrl+U',
+          click: () => mainWindow.webContents.send('menu-transform', 'lowercase'),
+        },
+        {
+          label: 'Title Case',
+          click: () => mainWindow.webContents.send('menu-transform', 'titlecase'),
+        },
+        {
+          label: 'camelCase',
+          click: () => mainWindow.webContents.send('menu-transform', 'camelcase'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Sort Lines Ascending',
+          click: () => mainWindow.webContents.send('menu-line-op', 'sort-asc'),
+        },
+        {
+          label: 'Sort Lines Descending',
+          click: () => mainWindow.webContents.send('menu-line-op', 'sort-desc'),
+        },
+        {
+          label: 'Remove Duplicate Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'remove-dupes'),
+        },
+        {
+          label: 'Remove Empty Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'remove-empty'),
+        },
+        {
+          label: 'Trim Trailing Whitespace',
+          click: () => mainWindow.webContents.send('menu-line-op', 'trim'),
+        },
+        {
+          label: 'Reverse Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'reverse'),
+        },
       ],
     },
   ]);

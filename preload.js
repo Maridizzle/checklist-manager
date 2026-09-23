@@ -26,4 +26,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuZoomIn: (callback) => ipcRenderer.on('menu-zoom-in', () => callback()),
   onMenuZoomOut: (callback) => ipcRenderer.on('menu-zoom-out', () => callback()),
   onMenuZoomReset: (callback) => ipcRenderer.on('menu-zoom-reset', () => callback()),
+  onMenuTransform: (callback) => ipcRenderer.on('menu-transform', (event, type) => callback(type)),
+  onMenuLineOp: (callback) => ipcRenderer.on('menu-line-op', (event, type) => callback(type)),
+  onMenuToggleSplit: (callback) => ipcRenderer.on('menu-toggle-split', () => callback()),
+  onMenuToggleTheme: (callback) => ipcRenderer.on('menu-toggle-theme', () => callback()),
 });

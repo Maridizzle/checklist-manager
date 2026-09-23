@@ -631,3 +631,101 @@ body.dragging-sidebar {
 .cm-wiki-bracket {
   color: #5a5a7a;
 }
+
+/* Split View */
+#editor-area.split-view {
+  display: flex;
+}
+
+#editor-area.split-view #editor {
+  flex: 1;
+  border-right: 1px solid var(--border);
+}
+
+#editor-area.split-view #editor-split {
+  flex: 1;
+  display: block;
+}
+
+#editor-split {
+  display: none;
+  height: 100%;
+  width: 100%;
+}
+
+#editor-split .cm-editor {
+  height: 100%;
+}
+
+.split-gutter {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.split-gutter:hover {
+  background: var(--accent);
+}
+
+/* Light Theme */
+body.light-theme {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f3f3;
+  --bg-tertiary: #ececec;
+  --bg-hover: #e0e0e0;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --text-active: #000000;
+  --accent: #0078d4;
+  --accent-hover: #106ebe;
+  --border: #d4d4d4;
+  --tab-active-bg: #ffffff;
+  --tab-inactive-bg: #ececec;
+  --modified-dot: #c67f17;
+}
+
+body.light-theme .cm-editor .cm-gutters {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+body.light-theme .cm-editor .cm-activeLineGutter {
+  background: var(--bg-tertiary);
+  color: var(--text-active);
+}
+
+body.light-theme .cm-editor .cm-activeLine {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+body.light-theme .cm-editor .cm-cursor {
+  border-left-color: var(--text-active);
+}
+
+body.light-theme .cm-editor .cm-selectionBackground,
+body.light-theme .cm-editor.cm-focused .cm-selectionBackground {
+  background: rgba(0, 120, 212, 0.2) !important;
+}
+
+body.light-theme .cm-wiki-link {
+  color: #0366d6;
+}
+
+body.light-theme .cm-wiki-link:hover {
+  color: #024ea4;
+}
+
+body.light-theme .cm-wiki-bracket {
+  color: #999999;
+}
+
+body.light-theme #autosave-indicator {
+  color: #2e8b57;
+  background: rgba(46, 139, 87, 0.1);
+}
+
+body.light-theme .cm-editor .cm-searchMatch {
+  background-color: rgba(255, 200, 0, 0.4);
+  outline: 1px solid rgba(255, 180, 0, 0.6);
+}
