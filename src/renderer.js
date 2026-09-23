@@ -18,6 +18,7 @@ import { java } from '@codemirror/lang-java';
 import { php } from '@codemirror/lang-php';
 import { rust } from '@codemirror/lang-rust';
 import { sql } from '@codemirror/lang-sql';
+import * as Diff from 'diff';
 
 const LANGUAGES = {
   '.js': { name: 'JavaScript', ext: javascript },
@@ -395,6 +396,7 @@ function initEditor() {
       fontCompartment.of([]),
       wikiLinkPlugin,
       grammarPlugin,
+      comparePluginLeft,
       themeCompartment.of(oneDark),
       keymap.of([
         ...closeBracketsKeymap,
@@ -539,6 +541,34 @@ function flashAutoSaveIndicator() {
 let proseMode = false;
 let grammarMatches = [];
 let grammarDecorations = Decoration.none;
+
+let leftCompareRanges = [];
+let rightCompareRanges = [];
+
+function buildCompareDecorations(view, ranges) {
+  const builder = new RangeSetBuilder();
+  const docLen = view.state.doc.length;
+  for (const range of ranges) {
+    if (range.from < docLen) {
+      const to = Math.min(range.to, docLen);
+      if (range.from < to) {
+        builder.add(range.from, to, Decoration.mark({ class: range.cls }));
+      }
+    }
+  }
+  return builder.finish();
+}
+
+const comparePluginLeft = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildCompareDecorations(view, leftCompareRanges);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildCompareDecorations(update.view, leftCompareRanges);
+    }
+  }
+}, { decorations: v => v.decorations });
 
 const grammarCompartment = new Compartment();
 
@@ -1229,80 +1259,257 @@ function lineOperation(type) {
 // Split view
 let splitView = false;
 let splitEditorView = null;
+let compareMode = false;
+
+function createSplitEditor(content, langExt, readOnly) {
+  const splitEl = document.getElementById('editor-split');
+  splitEl.innerHTML = '';
+
+  const extensions = [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    history(),
+    foldGutter(),
+    drawSelection(),
+    dropCursor(),
+    EditorState.allowMultipleSelections.of(true),
+    indentOnInput(),
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    bracketMatching(),
+    closeBrackets(),
+    autocompletion(),
+    rectangularSelection(),
+    crosshairCursor(),
+    highlightActiveLine(),
+    highlightSelectionMatches(),
+    languageCompartment.of(langExt),
+    wrapCompartment.of([]),
+    fontCompartment.of([]),
+    wikiLinkPlugin,
+    ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.decorations = buildCompareDecorations(view, rightCompareRanges);
+      }
+      update(update) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildCompareDecorations(update.view, rightCompareRanges);
+        }
+      }
+    }, { decorations: v => v.decorations }),
+    isDarkTheme ? oneDark : [],
+    keymap.of([
+      ...closeBracketsKeymap,
+      ...defaultKeymap,
+      ...searchKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+      ...completionKeymap,
+      indentWithTab,
+    ]),
+  ];
+
+  if (readOnly) {
+    extensions.push(EditorState.readOnly.of(true));
+  } else {
+    extensions.push(
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged && !compareMode) {
+          const mainDoc = editorView.state.doc.toString();
+          const splitDoc = splitEditorView.state.doc.toString();
+          if (mainDoc !== splitDoc) {
+            editorView.dispatch({
+              changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
+            });
+          }
+        }
+      })
+    );
+  }
+
+  const splitState = EditorState.create({ doc: content, extensions });
+
+  splitEditorView = new EditorView({
+    state: splitState,
+    parent: splitEl,
+  });
+
+  return splitEditorView;
+}
 
 function toggleSplitView() {
+  if (compareMode) {
+    closeCompare();
+    return;
+  }
+
   splitView = !splitView;
   const editorArea = document.getElementById('editor-area');
-  const splitEl = document.getElementById('editor-split');
-  const gutter = document.getElementById('split-gutter');
+  const editorEl = document.getElementById('editor');
 
   if (splitView) {
     editorArea.classList.add('split-view');
+    editorEl.style.width = '50%';
     if (!splitEditorView) {
       const tab = getActiveTab();
       const content = tab ? tab.content : '';
       const langExt = tab ? getLanguageExtension(tab.filePath) : [];
-
-      const splitState = EditorState.create({
-        doc: content,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          languageCompartment.of(langExt),
-          wrapCompartment.of([]),
-          fontCompartment.of([]),
-          wikiLinkPlugin,
-          isDarkTheme ? oneDark : [],
-          keymap.of([
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            indentWithTab,
-          ]),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const mainDoc = editorView.state.doc.toString();
-              const splitDoc = splitEditorView.state.doc.toString();
-              if (mainDoc !== splitDoc) {
-                editorView.dispatch({
-                  changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
-                });
-              }
-            }
-          }),
-        ],
-      });
-
-      splitEditorView = new EditorView({
-        state: splitState,
-        parent: splitEl,
-      });
+      createSplitEditor(content, langExt, false);
     }
   } else {
     editorArea.classList.remove('split-view');
+    editorEl.style.width = '';
     if (splitEditorView) {
       splitEditorView.destroy();
       splitEditorView = null;
     }
   }
+}
+
+function initSplitGutter() {
+  const gutter = document.getElementById('split-gutter');
+  let dragging = false;
+
+  gutter.addEventListener('mousedown', (e) => {
+    if (!splitView && !compareMode) return;
+    e.preventDefault();
+    dragging = true;
+    document.body.classList.add('dragging-split');
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const editorArea = document.getElementById('editor-area');
+    const rect = editorArea.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(20, Math.min(80, (x / rect.width) * 100));
+    document.getElementById('editor').style.width = pct + '%';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('dragging-split');
+  });
+}
+
+let pendingCompare = false;
+
+function openCompare() {
+  if (!window.electronAPI) return;
+  pendingCompare = true;
+  window.electronAPI.openFile();
+}
+
+function startCompare(rightPath, rightContent) {
+  const tab = getActiveTab();
+  const leftContent = editorView.state.doc.toString();
+  const leftName = tab && tab.filePath ? getFileName(tab.filePath) : 'Untitled';
+  const rightName = getFileName(rightPath);
+
+  compareMode = true;
+  splitView = true;
+
+  const editorArea = document.getElementById('editor-area');
+  editorArea.classList.add('split-view');
+  document.getElementById('editor').style.width = '50%';
+
+  computeCompareRanges(leftContent, rightContent);
+
+  editorView.dispatch({ effects: [] });
+
+  const langExt = getLanguageExtension(rightPath);
+  createSplitEditor(rightContent, langExt, true);
+
+  document.getElementById('compare-left-name').textContent = leftName;
+  document.getElementById('compare-right-name').textContent = rightName;
+
+  const added = leftCompareRanges.length === 0 && rightCompareRanges.length === 0
+    ? 0 : rightCompareRanges.length;
+  const removed = leftCompareRanges.length;
+  document.getElementById('compare-stats').textContent =
+    `+${rightCompareRanges.length} / -${leftCompareRanges.length} regions`;
+
+  document.getElementById('compare-bar').classList.remove('hidden');
+
+  syncCompareScroll();
+}
+
+function computeCompareRanges(leftContent, rightContent) {
+  const changes = Diff.diffLines(leftContent, rightContent);
+
+  leftCompareRanges = [];
+  rightCompareRanges = [];
+
+  let leftOffset = 0;
+  let rightOffset = 0;
+
+  for (const part of changes) {
+    const len = part.value.length;
+
+    if (part.added) {
+      rightCompareRanges.push({
+        from: rightOffset,
+        to: rightOffset + len,
+        cls: 'cm-compare-added',
+      });
+      rightOffset += len;
+    } else if (part.removed) {
+      leftCompareRanges.push({
+        from: leftOffset,
+        to: leftOffset + len,
+        cls: 'cm-compare-removed',
+      });
+      leftOffset += len;
+    } else {
+      leftOffset += len;
+      rightOffset += len;
+    }
+  }
+}
+
+function syncCompareScroll() {
+  if (!editorView || !splitEditorView) return;
+
+  let syncing = false;
+
+  const leftScroller = editorView.scrollDOM;
+  const rightScroller = splitEditorView.scrollDOM;
+
+  leftScroller.addEventListener('scroll', () => {
+    if (syncing) return;
+    syncing = true;
+    rightScroller.scrollTop = leftScroller.scrollTop;
+    syncing = false;
+  });
+
+  rightScroller.addEventListener('scroll', () => {
+    if (syncing) return;
+    syncing = true;
+    leftScroller.scrollTop = rightScroller.scrollTop;
+    syncing = false;
+  });
+}
+
+function closeCompare() {
+  compareMode = false;
+  splitView = false;
+
+  leftCompareRanges = [];
+  rightCompareRanges = [];
+
+  editorView.dispatch({ effects: [] });
+
+  const editorArea = document.getElementById('editor-area');
+  editorArea.classList.remove('split-view');
+  document.getElementById('editor').style.width = '';
+
+  if (splitEditorView) {
+    splitEditorView.destroy();
+    splitEditorView = null;
+  }
+
+  document.getElementById('compare-bar').classList.add('hidden');
 }
 
 // Theme toggle
@@ -1384,10 +1591,10 @@ function wireEvents() {
   document.getElementById('btn-wrap').addEventListener('click', toggleWrap);
 
   document.getElementById('btn-find').addEventListener('click', () => {
-    if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
+    openSearchPanel(editorView);
   });
   document.getElementById('btn-replace').addEventListener('click', () => {
-    if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
+    openSearchPanel(editorView);
   });
   document.getElementById('btn-goto').addEventListener('click', showGotoLineDialog);
   document.getElementById('btn-fold-all').addEventListener('click', () => {
@@ -1419,35 +1626,12 @@ function wireEvents() {
 
   document.getElementById('btn-prose').addEventListener('click', toggleProseMode);
 
-  document.getElementById('btn-grammar').addEventListener('click', () => {
-    const panel = document.getElementById('grammar-panel');
-    if (panel.classList.contains('hidden')) {
-      runGrammarCheck();
-    } else {
-      panel.classList.add('hidden');
-      document.getElementById('btn-grammar').classList.remove('active');
-    }
-  });
-
-  document.getElementById('prose-find-input').addEventListener('input', (e) => {
-    proseFindAll(e.target.value);
-  });
-  document.getElementById('prose-find-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.shiftKey ? proseFindPrev() : proseFindNext(); }
-    if (e.key === 'Escape') { closeProseFind(); }
-  });
-  document.getElementById('prose-find-next').addEventListener('click', proseFindNext);
-  document.getElementById('prose-find-prev').addEventListener('click', proseFindPrev);
-  document.getElementById('prose-find-close').addEventListener('click', closeProseFind);
-
-  document.getElementById('grammar-close').addEventListener('click', () => {
-    document.getElementById('grammar-panel').classList.add('hidden');
-    document.getElementById('btn-grammar').classList.remove('active');
-  });
-
   document.getElementById('prose-editor').addEventListener('input', () => {
     markModified();
   });
+
+  document.getElementById('btn-compare').addEventListener('click', openCompare);
+  document.getElementById('compare-close').addEventListener('click', closeCompare);
 
   document.getElementById('btn-open-folder').addEventListener('click', () => {
     if (window.electronAPI) window.electronAPI.openFolder();
@@ -1455,6 +1639,11 @@ function wireEvents() {
 
   if (window.electronAPI) {
     window.electronAPI.onFileOpened(({ filePath, content }) => {
+      if (pendingCompare) {
+        pendingCompare = false;
+        startCompare(filePath, content);
+        return;
+      }
       const existing = tabs.find(t => t.filePath === filePath);
       if (existing) {
         switchToTab(existing.id);
@@ -1470,12 +1659,8 @@ function wireEvents() {
     window.electronAPI.onMenuNew(() => createTab(null, ''));
     window.electronAPI.onMenuSave(() => saveCurrentFile());
     window.electronAPI.onMenuSaveAs(() => saveCurrentFileAs());
-    window.electronAPI.onMenuFind(() => {
-      if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
-    });
-    window.electronAPI.onMenuReplace(() => {
-      if (proseMode) { openProseFind(); } else { openSearchPanel(editorView); }
-    });
+    window.electronAPI.onMenuFind(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuReplace(() => openSearchPanel(editorView));
     window.electronAPI.onMenuGotoLine(showGotoLineDialog);
     window.electronAPI.onMenuToggleWrap(toggleWrap);
     window.electronAPI.onMenuToggleSidebar(toggleSidebar);
@@ -1497,6 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireEvents();
   initSidebarTabs();
   initSidebarResize();
+  initSplitGutter();
   initDragAndDrop();
   initGotoLineDialog();
   initMinimap();
