@@ -198,6 +198,34 @@ function createWindow() {
         },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About NotepadPlus',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'About NotepadPlus',
+              message: 'NotepadPlus v1.0.0',
+              detail: 'A Notepad++ inspired editor with wiki-style file links, custom fonts, background colors, and Grammarly compatibility.\n\nBuilt with Electron + CodeMirror 6.\nBy Maridizzle.',
+            });
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Grammarly',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Grammarly Compatibility',
+              message: 'Grammarly Support',
+              detail: 'NotepadPlus uses CodeMirror 6 which renders via contenteditable, making it compatible with Grammarly browser extension.\n\nTo use: Install the Grammarly desktop app or browser extension. Grammarly will detect the editor as a text input field.',
+            });
+          },
+        },
+      ],
+    },
   ]);
   Menu.setApplicationMenu(menu);
 }
@@ -310,6 +338,12 @@ ipcMain.handle('get-recent-files', async () => {
 ipcMain.handle('track-recent-file', async (event, { filePath }) => {
   addRecentFile(filePath);
   return { success: true };
+});
+
+ipcMain.handle('set-title', async (event, { title }) => {
+  if (mainWindow) {
+    mainWindow.setTitle(title);
+  }
 });
 
 app.whenReady().then(createWindow);

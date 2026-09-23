@@ -258,6 +258,14 @@ function renderTabs() {
   }
 }
 
+function updateWindowTitle() {
+  if (!window.electronAPI || !window.electronAPI.setTitle) return;
+  const tab = getActiveTab();
+  const fileName = tab ? getFileName(tab.filePath) : 'Untitled';
+  const modified = tab && tab.modified ? ' *' : '';
+  window.electronAPI.setTitle({ title: `${fileName}${modified} - NotepadPlus` });
+}
+
 function updateStatusBar() {
   const tab = getActiveTab();
   if (!tab) return;
@@ -274,7 +282,20 @@ function updateStatusBar() {
     const line = editorView.state.doc.lineAt(pos);
     const col = pos - line.from + 1;
     document.getElementById('status-position').textContent = `Ln ${line.number}, Col ${col}`;
+
+    const doc = editorView.state.doc;
+    document.getElementById('status-lines').textContent = `${doc.lines} lines`;
+
+    const { from, to } = editorView.state.selection.main;
+    if (from !== to) {
+      const selLen = to - from;
+      document.getElementById('status-selection').textContent = `(${selLen} selected)`;
+    } else {
+      document.getElementById('status-selection').textContent = '';
+    }
   }
+
+  updateWindowTitle();
 }
 
 function markModified() {
