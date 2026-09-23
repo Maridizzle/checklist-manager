@@ -21,7 +21,29 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: true,
     },
+  });
+
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (params.misspelledWord) {
+      const suggestions = params.dictionarySuggestions;
+      const menuItems = suggestions.slice(0, 8).map(word => ({
+        label: word,
+        click: () => mainWindow.webContents.replaceMisspelling(word),
+      }));
+
+      if (menuItems.length > 0) {
+        menuItems.push({ type: 'separator' });
+      }
+
+      menuItems.push({
+        label: 'Add to Dictionary',
+        click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      });
+
+      Menu.buildFromTemplate(menuItems).popup();
+    }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
