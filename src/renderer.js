@@ -1,9 +1,9 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
+import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches, openSearchPanel, closeSearchPanel } from '@codemirror/search';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
+import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, foldAll, unfoldAll } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { javascript } from '@codemirror/lang-javascript';
@@ -56,6 +56,72 @@ let activeTabId = null;
 let tabCounter = 0;
 let editorView = null;
 let fontSize = 14;
+let currentFolderPath = null;
+let autoSaveTimer = null;
+const AUTO_SAVE_DELAY = 2000;
+
+const fontCompartment = new Compartment();
+
+const wikiLinkMark = Decoration.mark({ class: 'cm-wiki-link' });
+const wikiBracketMark = Decoration.mark({ class: 'cm-wiki-bracket' });
+
+function buildWikiLinkDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const doc = view.state.doc;
+  const regex = /\[\[([^\]]+)\]\]/g;
+
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    let match;
+    regex.lastIndex = 0;
+    while ((match = regex.exec(line.text)) !== null) {
+      const from = line.from + match.index;
+      const bracketOpenEnd = from + 2;
+      const linkStart = bracketOpenEnd;
+      const linkEnd = linkStart + match[1].length;
+      const bracketCloseEnd = linkEnd + 2;
+
+      builder.add(from, bracketOpenEnd, wikiBracketMark);
+      builder.add(linkStart, linkEnd, wikiLinkMark);
+      builder.add(linkEnd, bracketCloseEnd, wikiBracketMark);
+    }
+  }
+  return builder.finish();
+}
+
+const wikiLinkPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildWikiLinkDecorations(view);
+  }
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildWikiLinkDecorations(update.view);
+    }
+  }
+}, {
+  decorations: v => v.decorations,
+  eventHandlers: {
+    click(e, view) {
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos === null) return;
+
+      const doc = view.state.doc;
+      const line = doc.lineAt(pos);
+      const regex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      while ((match = regex.exec(line.text)) !== null) {
+        const linkStart = line.from + match.index + 2;
+        const linkEnd = linkStart + match[1].length;
+        if (pos >= linkStart && pos <= linkEnd) {
+          if (e.ctrlKey || e.metaKey) {
+            resolveWikiLink(match[1]);
+            return;
+          }
+        }
+      }
+    }
+  }
+});
 
 function getFileExtension(filePath) {
   if (!filePath) return '';
@@ -192,6 +258,14 @@ function renderTabs() {
   }
 }
 
+function updateWindowTitle() {
+  if (!window.electronAPI || !window.electronAPI.setTitle) return;
+  const tab = getActiveTab();
+  const fileName = tab ? getFileName(tab.filePath) : 'Untitled';
+  const modified = tab && tab.modified ? ' *' : '';
+  window.electronAPI.setTitle({ title: `${fileName}${modified} - NotepadPlus` });
+}
+
 function updateStatusBar() {
   const tab = getActiveTab();
   if (!tab) return;
@@ -208,7 +282,20 @@ function updateStatusBar() {
     const line = editorView.state.doc.lineAt(pos);
     const col = pos - line.from + 1;
     document.getElementById('status-position').textContent = `Ln ${line.number}, Col ${col}`;
+
+    const doc = editorView.state.doc;
+    document.getElementById('status-lines').textContent = `${doc.lines} lines`;
+
+    const { from, to } = editorView.state.selection.main;
+    if (from !== to) {
+      const selLen = to - from;
+      document.getElementById('status-selection').textContent = `(${selLen} selected)`;
+    } else {
+      document.getElementById('status-selection').textContent = '';
+    }
   }
+
+  updateWindowTitle();
 }
 
 function markModified() {
@@ -219,6 +306,9 @@ function markModified() {
   tab.modified = currentContent !== tab.savedContent;
   renderTabs();
   updateStatusBar();
+  if (tab.modified && tab.filePath) {
+    scheduleAutoSave();
+  }
 }
 
 async function saveCurrentFile() {
@@ -290,7 +380,9 @@ function initEditor() {
       highlightSelectionMatches(),
       languageCompartment.of([]),
       wrapCompartment.of([]),
-      oneDark,
+      fontCompartment.of([]),
+      wikiLinkPlugin,
+      themeCompartment.of(oneDark),
       keymap.of([
         ...closeBracketsKeymap,
         ...defaultKeymap,
@@ -303,6 +395,7 @@ function initEditor() {
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           markModified();
+          if (minimapVisible) requestAnimationFrame(renderMinimap);
         }
         if (update.selectionSet || update.docChanged) {
           updateStatusBar();
@@ -317,6 +410,658 @@ function initEditor() {
   });
 
   createTab(null, '');
+}
+
+async function resolveWikiLink(linkText) {
+  const tab = getActiveTab();
+  if (!tab || !window.electronAPI) return;
+
+  let searchDir = currentFolderPath;
+  if (!searchDir && tab.filePath) {
+    searchDir = tab.filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  }
+  if (!searchDir) return;
+
+  const candidates = [
+    linkText,
+    linkText + '.txt',
+    linkText + '.md',
+    linkText + '.html',
+    linkText + '.js',
+    linkText + '.py',
+    linkText + '.json',
+  ];
+
+  for (const candidate of candidates) {
+    const fullPath = searchDir + '/' + candidate;
+    const result = await window.electronAPI.readFile({ filePath: fullPath });
+    if (result.success) {
+      await window.electronAPI.trackRecentFile({ filePath: fullPath });
+      const existing = tabs.find(t => t.filePath === fullPath);
+      if (existing) {
+        switchToTab(existing.id);
+      } else {
+        createTab(fullPath, result.content);
+      }
+      return;
+    }
+  }
+
+  await searchSubdirectories(searchDir, linkText);
+}
+
+async function searchSubdirectories(baseDir, linkText) {
+  if (!window.electronAPI) return;
+
+  const result = await window.electronAPI.readDirectory({ dirPath: baseDir });
+  if (!result.success) return;
+
+  for (const item of result.items) {
+    if (!item.isDirectory) {
+      const nameNoExt = item.name.replace(/\.[^.]+$/, '');
+      if (nameNoExt.toLowerCase() === linkText.toLowerCase() || item.name.toLowerCase() === linkText.toLowerCase()) {
+        await openFileFromPath(item.path);
+        return;
+      }
+    }
+  }
+
+  for (const item of result.items) {
+    if (item.isDirectory) {
+      const found = await searchSubdirForFile(item.path, linkText);
+      if (found) {
+        await openFileFromPath(found);
+        return;
+      }
+    }
+  }
+}
+
+async function searchSubdirForFile(dirPath, linkText) {
+  if (!window.electronAPI) return null;
+
+  const result = await window.electronAPI.readDirectory({ dirPath });
+  if (!result.success) return null;
+
+  for (const item of result.items) {
+    if (!item.isDirectory) {
+      const nameNoExt = item.name.replace(/\.[^.]+$/, '');
+      if (nameNoExt.toLowerCase() === linkText.toLowerCase() || item.name.toLowerCase() === linkText.toLowerCase()) {
+        return item.path;
+      }
+    }
+  }
+  return null;
+}
+
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    const tab = getActiveTab();
+    if (!tab || !tab.filePath || !tab.modified) return;
+    if (!window.electronAPI) return;
+
+    const content = editorView.state.doc.toString();
+    const result = await window.electronAPI.saveFile({ filePath: tab.filePath, content });
+    if (result.success) {
+      tab.savedContent = content;
+      tab.modified = false;
+      renderTabs();
+      updateStatusBar();
+      flashAutoSaveIndicator();
+    }
+  }, AUTO_SAVE_DELAY);
+}
+
+function flashAutoSaveIndicator() {
+  const indicator = document.getElementById('autosave-indicator');
+  indicator.textContent = 'Saved!';
+  indicator.style.color = '#4ec969';
+  setTimeout(() => {
+    indicator.textContent = 'Auto-save: ON';
+    indicator.style.color = '#73c991';
+  }, 1500);
+}
+
+function setEditorFont(fontFamily) {
+  editorView.dispatch({
+    effects: fontCompartment.reconfigure(
+      EditorView.theme({ '.cm-content, .cm-gutters': { fontFamily } })
+    ),
+  });
+}
+
+function setEditorBackground(color) {
+  editorView.dispatch({
+    effects: fontCompartment.reconfigure(
+      EditorView.theme({
+        '.cm-content, .cm-gutters': {
+          fontFamily: document.getElementById('font-select').value,
+        },
+        '&': { backgroundColor: color },
+        '.cm-gutters': { backgroundColor: color },
+      })
+    ),
+  });
+  document.getElementById('bg-color').value = color;
+}
+
+async function openFileFromPath(filePath) {
+  const existing = tabs.find(t => t.filePath === filePath);
+  if (existing) {
+    switchToTab(existing.id);
+    return;
+  }
+
+  if (window.electronAPI) {
+    const result = await window.electronAPI.readFile({ filePath });
+    if (result.success) {
+      await window.electronAPI.trackRecentFile({ filePath });
+      createTab(filePath, result.content);
+    }
+  }
+}
+
+async function loadFolderTree(folderPath) {
+  currentFolderPath = folderPath;
+  const container = document.getElementById('file-tree-content');
+  container.innerHTML = '';
+
+  const rootLabel = folderPath.replace(/\\/g, '/').split('/').pop();
+  const rootDiv = document.createElement('div');
+  rootDiv.className = 'tree-item';
+  rootDiv.style.paddingLeft = '4px';
+  rootDiv.style.fontWeight = '600';
+  rootDiv.innerHTML = `<span class="tree-icon folder">&#9660;</span><span class="tree-label">${rootLabel}</span>`;
+  container.appendChild(rootDiv);
+
+  const childrenDiv = document.createElement('div');
+  childrenDiv.className = 'tree-children expanded';
+  container.appendChild(childrenDiv);
+
+  await populateTreeLevel(childrenDiv, folderPath, 1);
+
+  rootDiv.addEventListener('click', () => {
+    const isExpanded = childrenDiv.classList.contains('expanded');
+    childrenDiv.classList.toggle('expanded');
+    rootDiv.querySelector('.tree-icon').innerHTML = isExpanded ? '&#9654;' : '&#9660;';
+  });
+}
+
+async function populateTreeLevel(parentEl, dirPath, depth) {
+  if (!window.electronAPI) return;
+
+  const result = await window.electronAPI.readDirectory({ dirPath });
+  if (!result.success) return;
+
+  for (const item of result.items) {
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'tree-item';
+    itemDiv.style.paddingLeft = (depth * 16 + 4) + 'px';
+
+    if (item.isDirectory) {
+      itemDiv.innerHTML = `<span class="tree-icon folder">&#9654;</span><span class="tree-label">${item.name}</span>`;
+
+      const childrenDiv = document.createElement('div');
+      childrenDiv.className = 'tree-children';
+      let loaded = false;
+
+      itemDiv.addEventListener('click', async () => {
+        const isExpanded = childrenDiv.classList.contains('expanded');
+        if (!loaded && !isExpanded) {
+          await populateTreeLevel(childrenDiv, item.path, depth + 1);
+          loaded = true;
+        }
+        childrenDiv.classList.toggle('expanded');
+        itemDiv.querySelector('.tree-icon').innerHTML = isExpanded ? '&#9654;' : '&#9660;';
+      });
+
+      parentEl.appendChild(itemDiv);
+      parentEl.appendChild(childrenDiv);
+    } else {
+      itemDiv.innerHTML = `<span class="tree-icon file">&#9679;</span><span class="tree-label">${item.name}</span>`;
+      itemDiv.addEventListener('click', () => openFileFromPath(item.path));
+      parentEl.appendChild(itemDiv);
+    }
+  }
+}
+
+async function loadRecentFiles() {
+  if (!window.electronAPI) return;
+
+  const container = document.getElementById('recent-files-content');
+  const files = await window.electronAPI.getRecentFiles();
+
+  if (!files || files.length === 0) {
+    container.innerHTML = '<div class="sidebar-placeholder">No recent files</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  for (const filePath of files) {
+    const item = document.createElement('div');
+    item.className = 'recent-item';
+
+    const name = filePath.replace(/\\/g, '/').split('/').pop();
+    const dir = filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+
+    item.innerHTML = `<span class="recent-name">${name}</span><span class="recent-path">${dir}</span>`;
+    item.addEventListener('click', () => openFileFromPath(filePath));
+    container.appendChild(item);
+  }
+}
+
+function initSidebarTabs() {
+  const tabBtns = document.querySelectorAll('.sidebar-tab');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.panel).classList.add('active');
+
+      if (btn.dataset.panel === 'recent-files') {
+        loadRecentFiles();
+      }
+    });
+  });
+}
+
+function initSidebarResize() {
+  const handle = document.getElementById('sidebar-resize-handle');
+  const sidebar = document.getElementById('sidebar');
+  let startX, startWidth;
+
+  handle.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startWidth = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.classList.add('dragging-sidebar');
+
+    const onMouseMove = (e) => {
+      const newWidth = startWidth + (e.clientX - startX);
+      sidebar.style.width = Math.max(150, Math.min(500, newWidth)) + 'px';
+    };
+
+    const onMouseUp = () => {
+      handle.classList.remove('dragging');
+      document.body.classList.remove('dragging-sidebar');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
+function showGotoLineDialog() {
+  const dialog = document.getElementById('goto-dialog');
+  const input = document.getElementById('goto-input');
+  dialog.classList.remove('hidden');
+  input.value = '';
+  input.focus();
+
+  const maxLine = editorView.state.doc.lines;
+  input.max = maxLine;
+  input.placeholder = `1 - ${maxLine}`;
+}
+
+function hideGotoLineDialog() {
+  document.getElementById('goto-dialog').classList.add('hidden');
+  editorView.focus();
+}
+
+function executeGotoLine() {
+  const input = document.getElementById('goto-input');
+  const lineNum = parseInt(input.value, 10);
+  if (isNaN(lineNum) || lineNum < 1) {
+    hideGotoLineDialog();
+    return;
+  }
+
+  const doc = editorView.state.doc;
+  const targetLine = Math.min(lineNum, doc.lines);
+  const line = doc.line(targetLine);
+
+  editorView.dispatch({
+    selection: { anchor: line.from },
+    effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+  });
+  hideGotoLineDialog();
+}
+
+function initGotoLineDialog() {
+  document.getElementById('goto-ok').addEventListener('click', executeGotoLine);
+  document.getElementById('goto-cancel').addEventListener('click', hideGotoLineDialog);
+
+  document.getElementById('goto-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') executeGotoLine();
+    if (e.key === 'Escape') hideGotoLineDialog();
+  });
+
+  document.getElementById('goto-dialog').addEventListener('click', (e) => {
+    if (e.target.classList.contains('dialog-overlay')) hideGotoLineDialog();
+  });
+}
+
+let minimapVisible = false;
+let minimapAnimFrame = null;
+
+function toggleMinimap() {
+  minimapVisible = !minimapVisible;
+  const minimap = document.getElementById('minimap');
+  const btn = document.getElementById('btn-minimap');
+
+  if (minimapVisible) {
+    minimap.classList.remove('hidden');
+    btn.classList.add('active');
+    renderMinimap();
+  } else {
+    minimap.classList.add('hidden');
+    btn.classList.remove('active');
+    if (minimapAnimFrame) cancelAnimationFrame(minimapAnimFrame);
+  }
+}
+
+function renderMinimap() {
+  if (!minimapVisible || !editorView) return;
+
+  const canvas = document.getElementById('minimap-canvas');
+  const container = document.getElementById('minimap');
+  const rect = container.getBoundingClientRect();
+
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const doc = editorView.state.doc;
+  const totalLines = doc.lines;
+  if (totalLines === 0) return;
+
+  const lineHeight = Math.max(1, Math.min(3, rect.height / totalLines));
+  const charWidth = 0.8;
+
+  ctx.font = `${lineHeight}px monospace`;
+
+  for (let i = 1; i <= totalLines && (i - 1) * lineHeight < rect.height; i++) {
+    const line = doc.line(i);
+    const text = line.text;
+    const y = (i - 1) * lineHeight;
+
+    for (let j = 0; j < Math.min(text.length, 120); j++) {
+      if (text[j] !== ' ' && text[j] !== '\t') {
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.35)';
+        ctx.fillRect(4 + j * charWidth, y, charWidth, lineHeight * 0.8);
+      }
+    }
+  }
+
+  const scrollInfo = editorView.scrollDOM;
+  const scrollTop = scrollInfo.scrollTop;
+  const scrollHeight = scrollInfo.scrollHeight;
+  const clientHeight = scrollInfo.clientHeight;
+
+  if (scrollHeight > 0) {
+    const viewportTop = (scrollTop / scrollHeight) * rect.height;
+    const viewportHeight = (clientHeight / scrollHeight) * rect.height;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(0, viewportTop, rect.width, viewportHeight);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeRect(0, viewportTop, rect.width, viewportHeight);
+  }
+}
+
+function initMinimap() {
+  const canvas = document.getElementById('minimap-canvas');
+
+  canvas.addEventListener('click', (e) => {
+    if (!editorView) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = e.offsetY / rect.height;
+    const scrollHeight = editorView.scrollDOM.scrollHeight;
+    const clientHeight = editorView.scrollDOM.clientHeight;
+    editorView.scrollDOM.scrollTop = ratio * (scrollHeight - clientHeight);
+  });
+
+  const observer = new MutationObserver(() => {
+    if (minimapVisible) requestAnimationFrame(renderMinimap);
+  });
+
+  setTimeout(() => {
+    const scroller = editorView?.scrollDOM;
+    if (scroller) {
+      scroller.addEventListener('scroll', () => {
+        if (minimapVisible) requestAnimationFrame(renderMinimap);
+      });
+    }
+  }, 500);
+}
+
+// Text transformations
+function transformText(type) {
+  if (!editorView) return;
+  const state = editorView.state;
+  const { from, to } = state.selection.main;
+  if (from === to) return;
+
+  const selected = state.sliceDoc(from, to);
+  let result;
+  switch (type) {
+    case 'uppercase':
+      result = selected.toUpperCase();
+      break;
+    case 'lowercase':
+      result = selected.toLowerCase();
+      break;
+    case 'titlecase':
+      result = selected.replace(/\b\w/g, c => c.toUpperCase());
+      break;
+    case 'camelcase':
+      result = selected
+        .replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '')
+        .replace(/^[A-Z]/, c => c.toLowerCase());
+      break;
+    default:
+      return;
+  }
+  editorView.dispatch({ changes: { from, to, insert: result } });
+}
+
+// Line operations
+function lineOperation(type) {
+  if (!editorView) return;
+  const state = editorView.state;
+  const doc = state.doc;
+  const { from, to } = state.selection.main;
+
+  let startLine, endLine;
+  if (from === to) {
+    startLine = 1;
+    endLine = doc.lines;
+  } else {
+    startLine = doc.lineAt(from).number;
+    endLine = doc.lineAt(to).number;
+  }
+
+  const lines = [];
+  for (let i = startLine; i <= endLine; i++) {
+    lines.push(doc.line(i).text);
+  }
+
+  let result;
+  switch (type) {
+    case 'sort-asc':
+      result = [...lines].sort((a, b) => a.localeCompare(b));
+      break;
+    case 'sort-desc':
+      result = [...lines].sort((a, b) => b.localeCompare(a));
+      break;
+    case 'remove-dupes':
+      result = [...new Set(lines)];
+      break;
+    case 'remove-empty':
+      result = lines.filter(l => l.trim().length > 0);
+      break;
+    case 'trim':
+      result = lines.map(l => l.trimEnd());
+      break;
+    case 'reverse':
+      result = [...lines].reverse();
+      break;
+    default:
+      return;
+  }
+
+  const rangeFrom = doc.line(startLine).from;
+  const rangeTo = doc.line(endLine).to;
+  editorView.dispatch({ changes: { from: rangeFrom, to: rangeTo, insert: result.join('\n') } });
+}
+
+// Split view
+let splitView = false;
+let splitEditorView = null;
+
+function toggleSplitView() {
+  splitView = !splitView;
+  const editorArea = document.getElementById('editor-area');
+  const splitEl = document.getElementById('editor-split');
+  const gutter = document.getElementById('split-gutter');
+
+  if (splitView) {
+    editorArea.classList.add('split-view');
+    if (!splitEditorView) {
+      const tab = getActiveTab();
+      const content = tab ? tab.content : '';
+      const langExt = tab ? getLanguageExtension(tab.filePath) : [];
+
+      const splitState = EditorState.create({
+        doc: content,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          foldGutter(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          bracketMatching(),
+          closeBrackets(),
+          autocompletion(),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          languageCompartment.of(langExt),
+          wrapCompartment.of([]),
+          fontCompartment.of([]),
+          wikiLinkPlugin,
+          isDarkTheme ? oneDark : [],
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...searchKeymap,
+            ...historyKeymap,
+            ...foldKeymap,
+            ...completionKeymap,
+            indentWithTab,
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const mainDoc = editorView.state.doc.toString();
+              const splitDoc = splitEditorView.state.doc.toString();
+              if (mainDoc !== splitDoc) {
+                editorView.dispatch({
+                  changes: { from: 0, to: editorView.state.doc.length, insert: splitDoc },
+                });
+              }
+            }
+          }),
+        ],
+      });
+
+      splitEditorView = new EditorView({
+        state: splitState,
+        parent: splitEl,
+      });
+    }
+  } else {
+    editorArea.classList.remove('split-view');
+    if (splitEditorView) {
+      splitEditorView.destroy();
+      splitEditorView = null;
+    }
+  }
+}
+
+// Theme toggle
+let isDarkTheme = true;
+const themeCompartment = new Compartment();
+
+function toggleTheme() {
+  isDarkTheme = !isDarkTheme;
+  document.body.classList.toggle('light-theme', !isDarkTheme);
+
+  editorView.dispatch({
+    effects: themeCompartment.reconfigure(isDarkTheme ? oneDark : []),
+  });
+
+  if (splitEditorView) {
+    splitEditorView.destroy();
+    splitEditorView = null;
+    if (splitView) {
+      toggleSplitView();
+      toggleSplitView();
+    }
+  }
+}
+
+let sidebarVisible = true;
+
+function toggleSidebar() {
+  sidebarVisible = !sidebarVisible;
+  const sidebar = document.getElementById('sidebar');
+  const handle = document.getElementById('sidebar-resize-handle');
+  const btn = document.getElementById('btn-sidebar-toggle');
+
+  if (sidebarVisible) {
+    sidebar.classList.remove('collapsed');
+    handle.style.display = '';
+    btn.classList.remove('active');
+  } else {
+    sidebar.classList.add('collapsed');
+    handle.style.display = 'none';
+    btn.classList.add('active');
+  }
+}
+
+function initDragAndDrop() {
+  const editorArea = document.getElementById('editor-area');
+
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        if (file.path) {
+          openFileFromPath(file.path);
+        }
+      }
+    }
+  });
 }
 
 function wireEvents() {
@@ -334,8 +1079,43 @@ function wireEvents() {
   };
   document.getElementById('btn-wrap').addEventListener('click', toggleWrap);
 
+  document.getElementById('btn-find').addEventListener('click', () => {
+    openSearchPanel(editorView);
+  });
+  document.getElementById('btn-replace').addEventListener('click', () => {
+    openSearchPanel(editorView);
+  });
+  document.getElementById('btn-goto').addEventListener('click', showGotoLineDialog);
+  document.getElementById('btn-fold-all').addEventListener('click', () => {
+    foldAll(editorView);
+  });
+  document.getElementById('btn-unfold-all').addEventListener('click', () => {
+    unfoldAll(editorView);
+  });
+  document.getElementById('btn-minimap').addEventListener('click', toggleMinimap);
+  document.getElementById('btn-sidebar-toggle').addEventListener('click', toggleSidebar);
+
   document.getElementById('btn-zoom-in').addEventListener('click', () => setFontSize(fontSize + 2));
   document.getElementById('btn-zoom-out').addEventListener('click', () => setFontSize(fontSize - 2));
+
+  document.getElementById('font-select').addEventListener('change', (e) => {
+    setEditorFont(e.target.value);
+  });
+
+  document.getElementById('bg-color').addEventListener('input', (e) => {
+    setEditorBackground(e.target.value);
+  });
+
+  document.querySelectorAll('.bg-preset').forEach(el => {
+    el.style.backgroundColor = el.dataset.color;
+    el.addEventListener('click', () => {
+      setEditorBackground(el.dataset.color);
+    });
+  });
+
+  document.getElementById('btn-open-folder').addEventListener('click', () => {
+    if (window.electronAPI) window.electronAPI.openFolder();
+  });
 
   if (window.electronAPI) {
     window.electronAPI.onFileOpened(({ filePath, content }) => {
@@ -347,17 +1127,38 @@ function wireEvents() {
       createTab(filePath, content);
     });
 
+    window.electronAPI.onFolderOpened(({ folderPath }) => {
+      loadFolderTree(folderPath);
+    });
+
     window.electronAPI.onMenuNew(() => createTab(null, ''));
     window.electronAPI.onMenuSave(() => saveCurrentFile());
     window.electronAPI.onMenuSaveAs(() => saveCurrentFileAs());
+    window.electronAPI.onMenuFind(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuReplace(() => openSearchPanel(editorView));
+    window.electronAPI.onMenuGotoLine(showGotoLineDialog);
     window.electronAPI.onMenuToggleWrap(toggleWrap);
+    window.electronAPI.onMenuToggleSidebar(toggleSidebar);
+    window.electronAPI.onMenuToggleMinimap(toggleMinimap);
+    window.electronAPI.onMenuFoldAll(() => foldAll(editorView));
+    window.electronAPI.onMenuUnfoldAll(() => unfoldAll(editorView));
     window.electronAPI.onMenuZoomIn(() => setFontSize(fontSize + 2));
     window.electronAPI.onMenuZoomOut(() => setFontSize(fontSize - 2));
     window.electronAPI.onMenuZoomReset(() => setFontSize(14));
+    window.electronAPI.onMenuTransform((type) => transformText(type));
+    window.electronAPI.onMenuLineOp((type) => lineOperation(type));
+    window.electronAPI.onMenuToggleSplit(toggleSplitView);
+    window.electronAPI.onMenuToggleTheme(toggleTheme);
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   initEditor();
   wireEvents();
+  initSidebarTabs();
+  initSidebarResize();
+  initDragAndDrop();
+  initGotoLineDialog();
+  initMinimap();
+  loadRecentFiles();
 });

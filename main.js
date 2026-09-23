@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let recentFiles = [];
+const MAX_RECENT = 15;
+
+function addRecentFile(filePath) {
+  recentFiles = recentFiles.filter(f => f !== filePath);
+  recentFiles.unshift(filePath);
+  if (recentFiles.length > MAX_RECENT) recentFiles.length = MAX_RECENT;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -44,6 +52,12 @@ function createWindow() {
         },
         { type: 'separator' },
         {
+          label: 'Open Folder...',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => handleFolderOpen(),
+        },
+        { type: 'separator' },
+        {
           label: 'Exit',
           accelerator: 'CmdOrCtrl+Q',
           click: () => app.quit(),
@@ -60,11 +74,46 @@ function createWindow() {
         { label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' },
         { label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' },
         { label: 'Select All', accelerator: 'CmdOrCtrl+A', role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find...',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow.webContents.send('menu-find'),
+        },
+        {
+          label: 'Replace...',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => mainWindow.webContents.send('menu-replace'),
+        },
+        {
+          label: 'Go to Line...',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => mainWindow.webContents.send('menu-goto-line'),
+        },
       ],
     },
     {
       label: 'View',
       submenu: [
+        {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => mainWindow.webContents.send('menu-toggle-sidebar'),
+        },
+        {
+          label: 'Toggle Minimap',
+          click: () => mainWindow.webContents.send('menu-toggle-minimap'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Fold All',
+          click: () => mainWindow.webContents.send('menu-fold-all'),
+        },
+        {
+          label: 'Unfold All',
+          click: () => mainWindow.webContents.send('menu-unfold-all'),
+        },
+        { type: 'separator' },
         {
           label: 'Toggle Word Wrap',
           accelerator: 'Alt+Z',
@@ -87,7 +136,94 @@ function createWindow() {
           click: () => mainWindow.webContents.send('menu-zoom-reset'),
         },
         { type: 'separator' },
+        {
+          label: 'Toggle Split View',
+          accelerator: 'CmdOrCtrl+\\',
+          click: () => mainWindow.webContents.send('menu-toggle-split'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle Theme (Dark/Light)',
+          click: () => mainWindow.webContents.send('menu-toggle-theme'),
+        },
+        { type: 'separator' },
         { label: 'Toggle Dev Tools', accelerator: 'F12', role: 'toggleDevTools' },
+      ],
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        {
+          label: 'UPPERCASE',
+          accelerator: 'CmdOrCtrl+Shift+U',
+          click: () => mainWindow.webContents.send('menu-transform', 'uppercase'),
+        },
+        {
+          label: 'lowercase',
+          accelerator: 'CmdOrCtrl+U',
+          click: () => mainWindow.webContents.send('menu-transform', 'lowercase'),
+        },
+        {
+          label: 'Title Case',
+          click: () => mainWindow.webContents.send('menu-transform', 'titlecase'),
+        },
+        {
+          label: 'camelCase',
+          click: () => mainWindow.webContents.send('menu-transform', 'camelcase'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Sort Lines Ascending',
+          click: () => mainWindow.webContents.send('menu-line-op', 'sort-asc'),
+        },
+        {
+          label: 'Sort Lines Descending',
+          click: () => mainWindow.webContents.send('menu-line-op', 'sort-desc'),
+        },
+        {
+          label: 'Remove Duplicate Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'remove-dupes'),
+        },
+        {
+          label: 'Remove Empty Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'remove-empty'),
+        },
+        {
+          label: 'Trim Trailing Whitespace',
+          click: () => mainWindow.webContents.send('menu-line-op', 'trim'),
+        },
+        {
+          label: 'Reverse Lines',
+          click: () => mainWindow.webContents.send('menu-line-op', 'reverse'),
+        },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About NotepadPlus',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'About NotepadPlus',
+              message: 'NotepadPlus v1.0.0',
+              detail: 'A Notepad++ inspired editor with wiki-style file links, custom fonts, background colors, and Grammarly compatibility.\n\nBuilt with Electron + CodeMirror 6.\nBy Maridizzle.',
+            });
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Grammarly',
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Grammarly Compatibility',
+              message: 'Grammarly Support',
+              detail: 'NotepadPlus uses CodeMirror 6 which renders via contenteditable, making it compatible with Grammarly browser extension.\n\nTo use: Install the Grammarly desktop app or browser extension. Grammarly will detect the editor as a text input field.',
+            });
+          },
+        },
       ],
     },
   ]);
@@ -108,6 +244,7 @@ async function handleFileOpen() {
     const filePath = result.filePaths[0];
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
+      addRecentFile(filePath);
       mainWindow.webContents.send('file-opened', { filePath, content });
     } catch (err) {
       dialog.showErrorBox('Error', `Could not read file: ${err.message}`);
@@ -115,8 +252,22 @@ async function handleFileOpen() {
   }
 }
 
+async function handleFolderOpen() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    mainWindow.webContents.send('folder-opened', { folderPath: result.filePaths[0] });
+  }
+}
+
 ipcMain.handle('dialog-open', async () => {
   await handleFileOpen();
+});
+
+ipcMain.handle('dialog-open-folder', async () => {
+  await handleFolderOpen();
 });
 
 ipcMain.handle('dialog-save-as', async (event, { content, defaultPath }) => {
@@ -151,9 +302,47 @@ ipcMain.handle('file-save', async (event, { filePath, content }) => {
 ipcMain.handle('file-read', async (event, { filePath }) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
+    addRecentFile(filePath);
     return { success: true, content };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('read-directory', async (event, { dirPath }) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const items = entries
+      .filter(e => !e.name.startsWith('.'))
+      .map(e => ({
+        name: e.name,
+        path: path.join(dirPath, e.name),
+        isDirectory: e.isDirectory(),
+      }))
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+    return { success: true, items };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-recent-files', async () => {
+  return recentFiles.filter(f => {
+    try { return fs.existsSync(f); } catch { return false; }
+  });
+});
+
+ipcMain.handle('track-recent-file', async (event, { filePath }) => {
+  addRecentFile(filePath);
+  return { success: true };
+});
+
+ipcMain.handle('set-title', async (event, { title }) => {
+  if (mainWindow) {
+    mainWindow.setTitle(title);
   }
 });
 
