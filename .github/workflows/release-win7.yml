@@ -1,0 +1,73 @@
+name: Build and Release (Windows 7)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0-win7)'
+        required: true
+        default: 'v1.0.0-win7'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: win7/package-lock.json
+
+      - name: Install dependencies
+        working-directory: win7
+        run: npm install
+
+      - name: Setup build files
+        working-directory: win7
+        run: npm run setup
+
+      - name: Bundle with esbuild
+        working-directory: win7
+        run: npm run build
+
+      - name: Build Windows distributable
+        working-directory: win7
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-win7
+          path: |
+            win7/dist/*.exe
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-win7
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: NotepadPlus ${{ inputs.version }} (Windows 7 Compatible)
+          files: dist/*
+          body: |
+            Windows 7 compatible build using Electron 22.
+            This version targets older systems that cannot run the standard release.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
