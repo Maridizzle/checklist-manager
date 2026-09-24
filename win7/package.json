@@ -12,6 +12,10 @@
   },
   "author": "Maridizzle",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Maridizzle/notepadplus.git"
+  },
   "devDependencies": {
     "electron": "22.3.27",
     "electron-builder": "^24.13.3",
