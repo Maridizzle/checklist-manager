@@ -1,0 +1,87 @@
+{
+  "name": "notepadplus-writer-tools",
+  "displayName": "NotepadPlus Writer Tools",
+  "description": "Wiki-style [[file links]], LanguageTool grammar checking, background color presets, and prose mode for VS Code.",
+  "version": "1.0.0",
+  "publisher": "Maridizzle",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Formatters"
+  ],
+  "keywords": [
+    "wiki links",
+    "grammar",
+    "prose",
+    "writing",
+    "languagetool",
+    "notepad"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "notepadplus.checkGrammar",
+        "title": "NotepadPlus: Check Grammar (LanguageTool)"
+      },
+      {
+        "command": "notepadplus.clearGrammar",
+        "title": "NotepadPlus: Clear Grammar Highlights"
+      },
+      {
+        "command": "notepadplus.toggleProseMode",
+        "title": "NotepadPlus: Toggle Prose Mode"
+      },
+      {
+        "command": "notepadplus.setBackground",
+        "title": "NotepadPlus: Set Editor Background Color"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "notepadplus.checkGrammar",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g"
+      },
+      {
+        "command": "notepadplus.toggleProseMode",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+p",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "NotepadPlus Writer Tools",
+      "properties": {
+        "notepadplus.wikiLinks.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable [[wiki-style]] file links in all files."
+        },
+        "notepadplus.wikiLinks.extensions": {
+          "type": "array",
+          "default": [".txt", ".md", ".html", ".js", ".py", ".json", ".ts"],
+          "description": "File extensions to try when resolving wiki links."
+        },
+        "notepadplus.grammar.language": {
+          "type": "string",
+          "default": "en-US",
+          "description": "Language code for LanguageTool grammar checks."
+        },
+        "notepadplus.backgroundColor": {
+          "type": "string",
+          "default": "",
+          "description": "Custom editor background color (hex). Leave empty for default theme."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0"
+  }
+}
