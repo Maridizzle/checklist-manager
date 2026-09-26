@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NotepadPlus</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Source+Code+Pro:wght@400;500&family=Ubuntu+Mono:wght@400;700&family=Roboto+Mono:wght@400;500&family=Merriweather:wght@400;700&family=Lora:wght@400;700&family=Open+Sans:wght@400;600&family=Literata:wght@400;700&family=Crimson+Text:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="toolbar">
@@ -28,18 +31,27 @@
     <span class="toolbar-separator"></span>
     <label class="toolbar-label" for="font-select">Font:</label>
     <select id="font-select" title="Editor Font">
-      <option value="'Consolas', monospace">Consolas</option>
-      <option value="'Fira Code', monospace">Fira Code</option>
-      <option value="'Source Code Pro', monospace">Source Code Pro</option>
-      <option value="'Courier New', monospace">Courier New</option>
-      <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
-      <option value="'Ubuntu Mono', monospace">Ubuntu Mono</option>
-      <option value="'Cascadia Code', monospace">Cascadia Code</option>
-      <option value="'Roboto Mono', monospace">Roboto Mono</option>
-      <option value="'Arial', sans-serif">Arial</option>
-      <option value="'Georgia', serif">Georgia</option>
-      <option value="'Times New Roman', serif">Times New Roman</option>
-      <option value="'Verdana', sans-serif">Verdana</option>
+      <optgroup label="Code Fonts">
+        <option value="'Fira Code', monospace">Fira Code</option>
+        <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+        <option value="'Source Code Pro', monospace">Source Code Pro</option>
+        <option value="'Roboto Mono', monospace">Roboto Mono</option>
+        <option value="'Ubuntu Mono', monospace">Ubuntu Mono</option>
+        <option value="'Consolas', monospace">Consolas</option>
+        <option value="'Cascadia Code', monospace">Cascadia Code</option>
+        <option value="'Courier New', monospace">Courier New</option>
+      </optgroup>
+      <optgroup label="Writing Fonts">
+        <option value="'Merriweather', serif">Merriweather</option>
+        <option value="'Lora', serif">Lora</option>
+        <option value="'Literata', serif">Literata</option>
+        <option value="'Crimson Text', serif">Crimson Text</option>
+        <option value="'Georgia', serif">Georgia</option>
+        <option value="'Open Sans', sans-serif">Open Sans</option>
+        <option value="'Verdana', sans-serif">Verdana</option>
+        <option value="'Arial', sans-serif">Arial</option>
+        <option value="'Times New Roman', serif">Times New Roman</option>
+      </optgroup>
     </select>
     <span class="toolbar-separator"></span>
     <label class="toolbar-label" for="bg-color">BG:</label>

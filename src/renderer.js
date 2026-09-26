@@ -51,6 +51,8 @@ const LANGUAGES = {
 
 const languageCompartment = new Compartment();
 const wrapCompartment = new Compartment();
+const splitWrapCompartment = new Compartment();
+const splitFontCompartment = new Compartment();
 
 let tabs = [];
 let activeTabId = null;
@@ -60,6 +62,11 @@ let fontSize = 14;
 let currentFolderPath = null;
 let autoSaveTimer = null;
 const AUTO_SAVE_DELAY = 2000;
+let wordWrap = false;
+let leftBgColor = '#282c34';
+let rightBgColor = '#282c34';
+let proseBgColor = '#282c34';
+let focusedPane = 'left';
 
 const fontCompartment = new Compartment();
 
@@ -899,7 +906,13 @@ function toggleProseMode() {
     editorEl.classList.add('hidden');
     proseEl.classList.remove('hidden');
     proseEl.style.fontFamily = document.getElementById('font-select').value;
+    proseEl.style.background = proseBgColor;
+    if (wordWrap) {
+      proseEl.style.whiteSpace = 'pre-wrap';
+      proseEl.style.overflowWrap = 'break-word';
+    }
     proseEl.focus();
+    focusedPane = 'prose';
     btn.classList.add('active');
   } else {
     const content = proseEl.value;
@@ -909,6 +922,7 @@ function toggleProseMode() {
     proseEl.classList.add('hidden');
     editorEl.classList.remove('hidden');
     editorView.focus();
+    focusedPane = 'left';
     btn.classList.remove('active');
   }
 }
@@ -916,23 +930,57 @@ function toggleProseMode() {
 function setEditorFont(fontFamily) {
   editorView.dispatch({
     effects: fontCompartment.reconfigure(
-      EditorView.theme({ '.cm-content, .cm-gutters': { fontFamily } })
-    ),
-  });
-}
-
-function setEditorBackground(color) {
-  editorView.dispatch({
-    effects: fontCompartment.reconfigure(
       EditorView.theme({
-        '.cm-content, .cm-gutters': {
-          fontFamily: document.getElementById('font-select').value,
-        },
-        '&': { backgroundColor: color },
-        '.cm-gutters': { backgroundColor: color },
+        '.cm-content, .cm-gutters': { fontFamily },
+        '&': { backgroundColor: leftBgColor },
+        '.cm-gutters': { backgroundColor: leftBgColor },
       })
     ),
   });
+  if (splitEditorView) {
+    splitEditorView.dispatch({
+      effects: splitFontCompartment.reconfigure(
+        EditorView.theme({
+          '.cm-content, .cm-gutters': { fontFamily },
+          '&': { backgroundColor: rightBgColor },
+          '.cm-gutters': { backgroundColor: rightBgColor },
+        })
+      ),
+    });
+  }
+  const proseEl = document.getElementById('prose-editor');
+  proseEl.style.fontFamily = fontFamily;
+}
+
+function setEditorBackground(color) {
+  const fontFamily = document.getElementById('font-select').value;
+
+  if (focusedPane === 'right' && splitEditorView) {
+    rightBgColor = color;
+    splitEditorView.dispatch({
+      effects: splitFontCompartment.reconfigure(
+        EditorView.theme({
+          '.cm-content, .cm-gutters': { fontFamily },
+          '&': { backgroundColor: color },
+          '.cm-gutters': { backgroundColor: color },
+        })
+      ),
+    });
+  } else if (focusedPane === 'prose') {
+    proseBgColor = color;
+    document.getElementById('prose-editor').style.background = color;
+  } else {
+    leftBgColor = color;
+    editorView.dispatch({
+      effects: fontCompartment.reconfigure(
+        EditorView.theme({
+          '.cm-content, .cm-gutters': { fontFamily },
+          '&': { backgroundColor: color },
+          '.cm-gutters': { backgroundColor: color },
+        })
+      ),
+    });
+  }
   document.getElementById('bg-color').value = color;
 }
 
@@ -1340,8 +1388,8 @@ function createSplitEditor(content, langExt, readOnly) {
     highlightActiveLine(),
     highlightSelectionMatches(),
     languageCompartment.of(langExt),
-    wrapCompartment.of([]),
-    fontCompartment.of([]),
+    splitWrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
+    splitFontCompartment.of([]),
     wikiLinkPlugin,
     ViewPlugin.fromClass(class {
       constructor(view) {
@@ -1402,10 +1450,15 @@ function toggleSplitView() {
   splitView = !splitView;
   const editorArea = document.getElementById('editor-area');
   const editorEl = document.getElementById('editor');
+  const proseEl = document.getElementById('prose-editor');
 
   if (splitView) {
     editorArea.classList.add('split-view');
-    editorEl.style.width = '50%';
+    if (proseMode) {
+      proseEl.style.width = '50%';
+    } else {
+      editorEl.style.width = '50%';
+    }
     if (!splitEditorView) {
       const tab = getActiveTab();
       const content = tab ? tab.content : '';
@@ -1415,6 +1468,7 @@ function toggleSplitView() {
   } else {
     editorArea.classList.remove('split-view');
     editorEl.style.width = '';
+    proseEl.style.width = '';
     if (splitEditorView) {
       splitEditorView.destroy();
       splitEditorView = null;
@@ -1439,7 +1493,11 @@ function initSplitGutter() {
     const rect = editorArea.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const pct = Math.max(20, Math.min(80, (x / rect.width) * 100));
-    document.getElementById('editor').style.width = pct + '%';
+    if (proseMode) {
+      document.getElementById('prose-editor').style.width = pct + '%';
+    } else {
+      document.getElementById('editor').style.width = pct + '%';
+    }
   });
 
   document.addEventListener('mouseup', () => {
@@ -1637,12 +1695,26 @@ function wireEvents() {
   document.getElementById('btn-save').addEventListener('click', () => saveCurrentFile());
   document.getElementById('btn-save-as').addEventListener('click', () => saveCurrentFileAs());
 
-  let wordWrap = false;
   const toggleWrap = () => {
     wordWrap = !wordWrap;
+    const wrapExt = wordWrap ? EditorView.lineWrapping : [];
     editorView.dispatch({
-      effects: wrapCompartment.reconfigure(wordWrap ? EditorView.lineWrapping : []),
+      effects: wrapCompartment.reconfigure(wrapExt),
     });
+    if (splitEditorView) {
+      splitEditorView.dispatch({
+        effects: splitWrapCompartment.reconfigure(wrapExt),
+      });
+    }
+    const proseEl = document.getElementById('prose-editor');
+    if (wordWrap) {
+      proseEl.style.whiteSpace = 'pre-wrap';
+      proseEl.style.overflowWrap = 'break-word';
+    } else {
+      proseEl.style.whiteSpace = 'pre';
+      proseEl.style.overflowWrap = '';
+    }
+    document.getElementById('btn-wrap').classList.toggle('active', wordWrap);
   };
   document.getElementById('btn-wrap').addEventListener('click', toggleWrap);
 
@@ -1684,6 +1756,16 @@ function wireEvents() {
 
   document.getElementById('prose-editor').addEventListener('input', () => {
     markModified();
+  });
+
+  document.getElementById('prose-editor').addEventListener('focus', () => {
+    focusedPane = 'prose';
+  });
+  document.getElementById('editor').addEventListener('focusin', () => {
+    focusedPane = 'left';
+  });
+  document.getElementById('editor-split').addEventListener('focusin', () => {
+    focusedPane = 'right';
   });
 
   document.getElementById('btn-compare').addEventListener('click', openCompare);

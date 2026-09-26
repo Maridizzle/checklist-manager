@@ -732,6 +732,12 @@ body.dragging-sidebar {
   overflow: hidden;
 }
 
+#editor-area.split-view #prose-editor {
+  flex: none;
+  width: 50%;
+  height: 100%;
+}
+
 #editor-area.split-view #editor-split {
   flex: 1;
   display: block;
@@ -974,11 +980,13 @@ body.light-theme .dialog-buttons button:last-child {
   outline: none;
   padding: 12px 16px;
   font-size: 14px;
-  font-family: 'Consolas', monospace;
+  font-family: 'Fira Code', monospace;
   line-height: 1.6;
   color: var(--text-primary);
   background: #282c34;
   tab-size: 4;
+  white-space: pre;
+  box-sizing: border-box;
 }
 
 #prose-editor.hidden {
