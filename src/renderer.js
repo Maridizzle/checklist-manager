@@ -168,6 +168,62 @@ function getActiveTab() {
   return tabs.find(t => t.id === activeTabId);
 }
 
+function getSessionState() {
+  const currentTab = getActiveTab();
+  if (currentTab && editorView) {
+    if (proseMode) {
+      currentTab.content = document.getElementById('prose-editor').value;
+    } else {
+      currentTab.content = editorView.state.doc.toString();
+    }
+    currentTab.scrollPos = editorView.scrollDOM.scrollTop;
+    currentTab.cursorPos = editorView.state.selection.main.head;
+  }
+
+  const activeIndex = tabs.findIndex(t => t.id === activeTabId);
+  return {
+    activeIndex,
+    tabs: tabs.map(t => ({
+      filePath: t.filePath,
+      content: t.filePath ? null : t.content,
+      cursorPos: t.cursorPos || 0,
+      scrollPos: t.scrollPos || 0,
+    })),
+  };
+}
+
+async function restoreSession(session) {
+  while (tabs.length > 0) {
+    tabs.pop();
+  }
+  activeTabId = null;
+  renderTabs();
+
+  for (const saved of session.tabs) {
+    if (saved.filePath) {
+      try {
+        const result = await window.electronAPI.readFile({ filePath: saved.filePath });
+        if (result.success) {
+          const tab = createTab(saved.filePath, result.content);
+          tab.cursorPos = saved.cursorPos || 0;
+          tab.scrollPos = saved.scrollPos || 0;
+        }
+      } catch (e) {}
+    } else if (saved.content) {
+      const tab = createTab(null, saved.content);
+      tab.cursorPos = saved.cursorPos || 0;
+      tab.scrollPos = saved.scrollPos || 0;
+    }
+  }
+
+  const targetIndex = session.activeIndex != null ? session.activeIndex : 0;
+  if (targetIndex < tabs.length) {
+    switchToTab(tabs[targetIndex].id);
+  } else if (tabs.length > 0) {
+    switchToTab(tabs[0].id);
+  }
+}
+
 function switchToTab(id) {
   const currentTab = getActiveTab();
   if (currentTab && editorView) {
@@ -1674,7 +1730,18 @@ function wireEvents() {
     window.electronAPI.onMenuLineOp((type) => lineOperation(type));
     window.electronAPI.onMenuToggleSplit(toggleSplitView);
     window.electronAPI.onMenuToggleTheme(toggleTheme);
+
+    window.electronAPI.onRestoreSession((session) => {
+      restoreSession(session);
+    });
   }
+
+  window.addEventListener('beforeunload', () => {
+    if (window.electronAPI) {
+      const state = getSessionState();
+      window.electronAPI.saveSession(state);
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

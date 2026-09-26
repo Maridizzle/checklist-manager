@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   trackRecentFile: (data) => ipcRenderer.invoke('track-recent-file', data),
   setTitle: (data) => ipcRenderer.invoke('set-title', data),
   checkGrammar: (data) => ipcRenderer.invoke('check-grammar', data),
+  saveSession: (data) => ipcRenderer.send('save-session', data),
 
   onFileOpened: (callback) => ipcRenderer.on('file-opened', (event, data) => callback(data)),
   onFolderOpened: (callback) => ipcRenderer.on('folder-opened', (event, data) => callback(data)),
@@ -32,4 +33,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuLineOp: (callback) => ipcRenderer.on('menu-line-op', (event, type) => callback(type)),
   onMenuToggleSplit: (callback) => ipcRenderer.on('menu-toggle-split', () => callback()),
   onMenuToggleTheme: (callback) => ipcRenderer.on('menu-toggle-theme', () => callback()),
+  onRestoreSession: (callback) => ipcRenderer.on('restore-session', (event, data) => callback(data)),
 });

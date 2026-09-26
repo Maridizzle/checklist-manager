@@ -6,6 +6,23 @@ let mainWindow;
 let recentFiles = [];
 const MAX_RECENT = 15;
 
+const sessionFile = path.join(app.getPath('userData'), 'session.json');
+
+function loadSession() {
+  try {
+    if (fs.existsSync(sessionFile)) {
+      return JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+    }
+  } catch (e) {}
+  return null;
+}
+
+function saveSession(data) {
+  try {
+    fs.writeFileSync(sessionFile, JSON.stringify(data), 'utf-8');
+  } catch (e) {}
+}
+
 function addRecentFile(filePath) {
   recentFiles = recentFiles.filter(f => f !== filePath);
   recentFiles.unshift(filePath);
@@ -47,6 +64,13 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    const session = loadSession();
+    if (session && session.tabs && session.tabs.length > 0) {
+      mainWindow.webContents.send('restore-session', session);
+    }
+  });
 
   const menu = Menu.buildFromTemplate([
     {
@@ -411,6 +435,10 @@ ipcMain.handle('set-title', async (event, { title }) => {
   if (mainWindow) {
     mainWindow.setTitle(title);
   }
+});
+
+ipcMain.on('save-session', (event, data) => {
+  saveSession(data);
 });
 
 app.whenReady().then(createWindow);
